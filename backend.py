@@ -20,6 +20,8 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 import io
+from dotenv import load_dotenv
+load_dotenv()
 
 from models import (
     Base, User, Analysis, Issue, LLMComparison, AccessibilityStandard,
@@ -41,7 +43,7 @@ app.add_middleware(
 )
 
 # JWT settings
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecret123")
 ALGORITHM = "HS256"
 
 # Initialize database
@@ -878,22 +880,22 @@ async def get_models():
     return {
         "models": [
             {
-                "id": "gpt-4",
-                "name": "GPT-4",
+                "id": "gpt-4o",
+                "name": "GPT-4o",
                 "provider": "OpenAI",
                 "description": "Advanced reasoning and code analysis",
                 "capabilities": ["Code review", "WCAG compliance", "Automotive safety analysis"]
             },
             {
-                "id": "claude-3-sonnet",
-                "name": "Claude 3 Sonnet",
+                "id": "claude-opus-4",
+                "name": "Claude Opus 4",
                 "provider": "Anthropic",
                 "description": "Balanced performance for accessibility analysis",
                 "capabilities": ["Accessibility review", "Standards compliance", "Detailed explanations"]
             },
             {
-                "id": "deepseek-coder",
-                "name": "DeepSeek Coder",
+                "id": "Deepseek-V3",
+                "name": "DeepSeek V3",
                 "provider": "DeepSeek",
                 "description": "Specialized code analysis and debugging",
                 "capabilities": ["Code optimization", "Bug detection", "Performance analysis"]

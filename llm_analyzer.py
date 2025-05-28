@@ -5,6 +5,8 @@ import re
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
 import anthropic
+from dotenv import load_dotenv
+load_dotenv()
 
 
 class InfotainmentLLMAnalyzer:
