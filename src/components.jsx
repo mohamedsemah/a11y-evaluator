@@ -636,7 +636,7 @@ export const DiffViewModal = ({ isOpen, onClose, codeView }) => (
               <DiffEditor
                 original={codeView.issue.original_code || '// No original code available'}
                 modified={codeView.issue.suggested_fix || '// No suggested fix available'}
-                language="javascript"
+                language={detectLanguage(file)}
                 theme="vs-light"
                 options={{
                   readOnly: true,

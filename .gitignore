@@ -38,3 +38,6 @@ htmlcov/
 
 # Docker
 .docker/
+
+package.json
+package-lock.json

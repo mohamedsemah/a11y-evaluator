@@ -83,13 +83,6 @@ function App() {
   // Configuration state
   const [selectedModels, setSelectedModels] = useState([]);
   const [selectedStandards, setSelectedStandards] = useState(['WCAG 2.2', 'ISO15008', 'NHTSA']);
-  const [vehicleContext, setVehicleContext] = useState({
-    driving_mode: true,
-    lighting_condition: 'variable',
-    speed_range: '0-120',
-    interaction_methods: ['touch', 'voice', 'physical_button'],
-    user_experience_level: 'experienced'
-  });
 
   // Available options
   const [availableModels, setAvailableModels] = useState([]);
@@ -365,8 +358,7 @@ function App() {
         },
         body: JSON.stringify({
           llm_models: selectedModels,
-          standards: selectedStandards,
-          vehicle_context: vehicleContext
+          standards: selectedStandards
         })
       });
 
@@ -499,10 +491,6 @@ function App() {
         setAnalysisStatus(data.analysis.status);
         setSelectedModels(data.analysis.models_used || []);
         setSelectedStandards(data.analysis.standards_applied || []);
-
-        if (data.analysis.vehicle_context) {
-          setVehicleContext(data.analysis.vehicle_context);
-        }
 
         // Fetch insights if analysis is completed
         if (data.analysis.status === 'completed') {
@@ -826,93 +814,6 @@ function App() {
                     </Card>
                   </SimpleGrid>
 
-                  {/* Vehicle Context */}
-                  <Card>
-                    <CardHeader>
-                      <Heading size="sm">Vehicle Context</Heading>
-                    </CardHeader>
-                    <CardBody>
-                      <SimpleGrid columns={[1, 2]} spacing={4}>
-                        <FormControl>
-                          <FormLabel>Lighting Condition</FormLabel>
-                          <Select
-                            value={vehicleContext.lighting_condition}
-                            onChange={(e) => setVehicleContext({
-                              ...vehicleContext,
-                              lighting_condition: e.target.value
-                            })}
-                          >
-                            <option value="daylight">Daylight</option>
-                            <option value="night">Night</option>
-                            <option value="twilight">Twilight</option>
-                            <option value="variable">Variable</option>
-                          </Select>
-                        </FormControl>
-
-                        <FormControl>
-                          <FormLabel>Speed Range (km/h)</FormLabel>
-                          <Select
-                            value={vehicleContext.speed_range}
-                            onChange={(e) => setVehicleContext({
-                              ...vehicleContext,
-                              speed_range: e.target.value
-                            })}
-                          >
-                            <option value="0">Parked</option>
-                            <option value="1-30">City (1-30)</option>
-                            <option value="31-60">Suburban (31-60)</option>
-                            <option value="61-120">Highway (61-120)</option>
-                            <option value="0-120">All speeds</option>
-                          </Select>
-                        </FormControl>
-
-                        <FormControl>
-                          <FormLabel>User Experience Level</FormLabel>
-                          <Select
-                            value={vehicleContext.user_experience_level}
-                            onChange={(e) => setVehicleContext({
-                              ...vehicleContext,
-                              user_experience_level: e.target.value
-                            })}
-                          >
-                            <option value="novice">Novice</option>
-                            <option value="experienced">Experienced</option>
-                          </Select>
-                        </FormControl>
-
-                        <FormControl>
-                          <Checkbox
-                            isChecked={vehicleContext.driving_mode}
-                            onChange={(e) => setVehicleContext({
-                              ...vehicleContext,
-                              driving_mode: e.target.checked
-                            })}
-                          >
-                            Driving Mode Active
-                          </Checkbox>
-                        </FormControl>
-                      </SimpleGrid>
-
-                      <Box mt={4}>
-                        <FormLabel>Interaction Methods</FormLabel>
-                        <CheckboxGroup
-                          value={vehicleContext.interaction_methods}
-                          onChange={(methods) => setVehicleContext({
-                            ...vehicleContext,
-                            interaction_methods: methods
-                          })}
-                        >
-                          <Stack direction="row" wrap="wrap">
-                            <Checkbox value="touch">Touch</Checkbox>
-                            <Checkbox value="voice">Voice</Checkbox>
-                            <Checkbox value="physical_button">Physical Buttons</Checkbox>
-                            <Checkbox value="steering_wheel">Steering Wheel</Checkbox>
-                          </Stack>
-                        </CheckboxGroup>
-                      </Box>
-                    </CardBody>
-                  </Card>
-
                   {/* Start Analysis */}
                   <Button
                     colorScheme="blue"
@@ -1014,28 +915,42 @@ function App() {
                                 <Text mb={3}>{issue.description}</Text>
 
                                 {/* Standards Information */}
-                                {(issue.wcag_criteria || issue.iso15008_criteria || issue.nhtsa_criteria) && (
+                                {(issue.wcag_criteria?.length > 0 || issue.iso15008_criteria?.length > 0 || issue.nhtsa_criteria?.length > 0 || issue.sae_criteria?.length > 0 || issue.gtr8_criteria?.length > 0) && (
                                   <Box mb={3}>
                                     <Text fontSize="sm" fontWeight="bold" mb={1}>Standards Violated:</Text>
                                     <Wrap>
-                                      {issue.wcag_criteria && (
+                                      {issue.wcag_criteria && issue.wcag_criteria.length > 0 && (
                                         <WrapItem>
                                           <Tag size="sm" colorScheme="blue">
                                             WCAG {issue.wcag_level} - {issue.wcag_principle}
                                           </Tag>
                                         </WrapItem>
                                       )}
-                                      {issue.iso15008_criteria && (
+                                      {issue.iso15008_criteria && issue.iso15008_criteria.length > 0 && (
                                         <WrapItem>
                                           <Tag size="sm" colorScheme="green">
                                             ISO 15008
                                           </Tag>
                                         </WrapItem>
                                       )}
-                                      {issue.nhtsa_criteria && (
+                                      {issue.nhtsa_criteria && issue.nhtsa_criteria.length > 0 && (
                                         <WrapItem>
                                           <Tag size="sm" colorScheme="red">
                                             NHTSA
+                                          </Tag>
+                                        </WrapItem>
+                                      )}
+                                      {issue.sae_criteria && issue.sae_criteria.length > 0 && (
+                                        <WrapItem>
+                                          <Tag size="sm" colorScheme="orange">
+                                            SAE
+                                          </Tag>
+                                        </WrapItem>
+                                      )}
+                                      {issue.gtr8_criteria && issue.gtr8_criteria.length > 0 && (
+                                        <WrapItem>
+                                          <Tag size="sm" colorScheme="purple">
+                                            GTR8
                                           </Tag>
                                         </WrapItem>
                                       )}
@@ -1358,9 +1273,6 @@ function App() {
                               <Text fontSize="sm">
                                 {analysis.context_type || 'infotainment'}
                               </Text>
-                              {analysis.vehicle_context?.driving_mode && (
-                                <Badge size="sm" colorScheme="orange">Driving Mode</Badge>
-                              )}
                             </VStack>
                           </Flex>
                         </CardBody>

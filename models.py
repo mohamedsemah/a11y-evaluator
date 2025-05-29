@@ -37,7 +37,7 @@ class User(Base):
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete-orphan")
 
 
-# Enhanced Analysis model with infotainment-specific fields
+# Enhanced Analysis model without vehicle_context
 class Analysis(Base):
     __tablename__ = "analyses"
 
@@ -50,7 +50,6 @@ class Analysis(Base):
 
     # Infotainment-specific fields
     context_type = Column(String, default="infotainment")  # infotainment, general, mobile, etc.
-    vehicle_context = Column(JSON)  # Vehicle-specific context data
     interaction_methods = Column(JSON)  # touch, voice, physical_button, steering_wheel
 
     # Status and timing
@@ -233,14 +232,13 @@ class InfotainmentContext(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Enhanced helper functions with better error handling
+# Enhanced helper functions without vehicle context
 def create_infotainment_analysis(
         db: Session,
         user_id: str,
         file_contents: dict,
         selected_models: list,
-        selected_standards: list = None,
-        vehicle_context: dict = None
+        selected_standards: list = None
 ) -> Analysis:
     """Create a new infotainment accessibility analysis with enhanced validation."""
 
@@ -252,15 +250,6 @@ def create_infotainment_analysis(
     if selected_standards is None:
         selected_standards = ["WCAG 2.2", "ISO15008", "NHTSA"]
 
-    if vehicle_context is None:
-        vehicle_context = {
-            "driving_mode": True,
-            "lighting_condition": "variable",
-            "speed_range": "0-120",
-            "interaction_methods": ["touch", "voice", "physical_button"],
-            "user_experience_level": "experienced"
-        }
-
     try:
         analysis = Analysis(
             user_id=user_id,
@@ -269,7 +258,6 @@ def create_infotainment_analysis(
             selected_models=selected_models,
             selected_standards=selected_standards,
             context_type="infotainment",
-            vehicle_context=vehicle_context,
             status="uploaded"
         )
 
@@ -430,8 +418,7 @@ def get_infotainment_analysis_summary(db: Session, analysis_id: str) -> Optional
                 "file_count": len(analysis.file_names),
                 "models_used": analysis.selected_models,
                 "standards_applied": analysis.selected_standards,
-                "context_type": analysis.context_type,
-                "vehicle_context": analysis.vehicle_context
+                "context_type": analysis.context_type
             },
             "issue_summary": {
                 "total_issues": total_issues,

@@ -118,15 +118,6 @@ class BatchFixRequest(BaseModel):
 class InfotainmentAnalyzeRequest(BaseModel):
     llm_models: List[str]
     standards: List[str] = ["WCAG 2.2", "ISO15008", "NHTSA"]
-    vehicle_context: Optional[Dict] = None
-
-
-class VehicleContextRequest(BaseModel):
-    driving_mode: bool = True
-    lighting_condition: str = "variable"  # daylight, night, twilight, variable
-    speed_range: str = "0-120"  # 0, 1-30, 31-60, 61+
-    interaction_methods: List[str] = ["touch", "voice", "physical_button"]
-    user_experience_level: str = "experienced"  # novice, experienced
 
 
 # Enhanced Authentication endpoints with better error handling
@@ -284,13 +275,13 @@ def _is_infotainment_relevant(filename: str) -> bool:
     return any(keyword in filename.lower() for keyword in infotainment_keywords)
 
 
-# Enhanced analysis endpoint with user validation
+# Enhanced analysis endpoint without vehicle context
 @app.post("/api/analyze/{analysis_id}")
 async def analyze_code(
         analysis_id: str,
         payload: InfotainmentAnalyzeRequest,
         background_tasks: BackgroundTasks,
-        user_id: str = Depends(get_current_user_with_validation),  # Enhanced validation
+        user_id: str = Depends(get_current_user_with_validation),
         db: Session = Depends(get_db)
 ):
     analysis = db.query(Analysis).filter(
@@ -305,18 +296,6 @@ async def analyze_code(
     analysis.status = "analyzing"
     analysis.selected_models = payload.llm_models
     analysis.selected_standards = payload.standards
-
-    # Set vehicle context with defaults
-    if payload.vehicle_context:
-        analysis.vehicle_context = payload.vehicle_context
-    else:
-        analysis.vehicle_context = {
-            "driving_mode": True,
-            "lighting_condition": "variable",
-            "speed_range": "0-120",
-            "interaction_methods": ["touch", "voice", "physical_button"],
-            "user_experience_level": "experienced"
-        }
 
     db.commit()
 
@@ -359,7 +338,8 @@ async def run_infotainment_analysis(analysis_id: str, llm_models: List[str], sta
                 issues = await llm_analyzer.analyze_code(
                     analysis.file_contents,
                     model,
-                    analysis_id
+                    analysis_id,
+                    standards  # Pass selected standards to analyzer
                 )
                 end_time = datetime.utcnow()
 
@@ -475,7 +455,7 @@ def create_infotainment_comparisons(analysis_id: str, all_issues: Dict, db: Sess
         db.add(comparison)
 
 
-# All other endpoints updated with enhanced user validation
+# Updated get_analysis endpoint without vehicle context
 @app.get("/api/analysis/{analysis_id}")
 async def get_analysis(
         analysis_id: str,
@@ -556,7 +536,6 @@ async def get_analysis(
         ],
         "file_contents": analysis.file_contents,
         "context_type": analysis.context_type,
-        "vehicle_context": analysis.vehicle_context,
         "selected_standards": analysis.selected_standards
     }
 
@@ -823,7 +802,6 @@ async def get_analyses(
             "context_type": analysis.context_type,
             "models": analysis.selected_models,
             "standards": analysis.selected_standards,
-            "vehicle_context": analysis.vehicle_context,
             "error_message": analysis.error_message
         }
         for analysis in analyses

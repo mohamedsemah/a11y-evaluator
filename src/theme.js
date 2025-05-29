@@ -114,11 +114,11 @@ export const theme = extendTheme({
     body: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
   styles: {
-    global: {
-      body: {
-        bg: 'gray.50',
-        color: 'gray.800',
-      },
+  global: {
+    body: {
+      bg: 'gray.50',
+      color: 'gray.800',
     },
   },
+},
 });

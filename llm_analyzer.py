@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from openai import AsyncOpenAI
 import anthropic
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -24,8 +25,8 @@ class InfotainmentLLMAnalyzer:
         self.openai_client = AsyncOpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
         self.anthropic_client = anthropic.Anthropic(api_key=self.anthropic_api_key) if self.anthropic_api_key else None
 
-        # Comprehensive system prompt for infotainment accessibility analysis
-        self.system_prompt = """You are an expert in infotainment system accessibility, specializing in automotive HMI design and comprehensive accessibility standards. Analyze the provided code for accessibility issues following ALL relevant standards.
+        # Base system prompt (will be customized based on selected standards)
+        self.base_system_prompt = """You are an expert in infotainment system accessibility, specializing in automotive HMI design and comprehensive accessibility standards. Analyze the provided code for accessibility issues following the SELECTED standards only.
 
 CRITICAL: You must respond with valid JSON in exactly this format:
 {
@@ -61,8 +62,51 @@ CRITICAL: You must respond with valid JSON in exactly this format:
   ]
 }
 
-=== STANDARDS TO ANALYZE AGAINST ===
+IMPORTANT: Only populate the criteria fields for standards that are being analyzed. If a standard is not selected, set its criteria field to null or omit it entirely.
 
+"""
+
+        # Infotainment-specific issue types
+        self.infotainment_issue_types = [
+            # Visual & Display
+            'inadequate_daylight_contrast', 'inadequate_night_contrast', 'character_too_small_driving',
+            'excessive_visual_complexity', 'poor_glare_control', 'color_dependency_driving',
+            'animation_distraction', 'missing_alt_text', 'low_contrast',
+
+            # Interaction & Control
+            'complex_gesture_while_driving', 'inadequate_touch_targets', 'missing_physical_backup',
+            'steering_wheel_inaccessible', 'voice_command_mismatch', 'accidental_activation',
+            'poor_haptic_feedback', 'missing_label', 'keyboard_trap',
+
+            # Timing & Attention
+            'excessive_task_time', 'excessive_glance_time', 'excessive_glance_count',
+            'no_progress_indication', 'timeout_too_short', 'cognitive_overload',
+
+            # Audio & Voice
+            'inadequate_voice_feedback', 'speech_interference', 'missing_audio_alternatives',
+            'inconsistent_voice_commands', 'no_audio_ducking', 'poor_speech_recognition',
+
+            # Safety & Emergency
+            'blocked_critical_info', 'emergency_function_buried', 'system_failure_unsafe',
+            'driver_trap', 'attention_capture',
+
+            # Context & Adaptation
+            'no_driving_mode_adaptation', 'poor_lighting_adaptation', 'missing_context_awareness',
+            'passenger_driver_confusion',
+
+            # Traditional Web Issues (Enhanced for Infotainment)
+            'aria_issue', 'focus_issue', 'semantic_issue', 'heading_structure', 'table_headers'
+        ]
+
+    def _get_system_prompt_for_standards(self, selected_standards: List[str]) -> str:
+        """Generate system prompt with only selected standards."""
+        prompt = self.base_system_prompt
+
+        # Add standard-specific sections based on selection
+        standards_content = "\n=== STANDARDS TO ANALYZE AGAINST ===\n\n"
+
+        if "WCAG 2.2" in selected_standards or "WCAG" in selected_standards:
+            standards_content += """
 🌐 WCAG 2.1/2.2 SUCCESS CRITERIA (Primary Focus):
 Level A (Essential):
 - 1.1.1 Non-text Content: All images, icons, media need text alternatives for voice control
@@ -104,7 +148,10 @@ Level AA (Standard):
 - 3.3.3 Error Suggestion: Provide suggestions for fixing input errors
 - 3.3.4 Error Prevention: Prevent errors in legal/financial/data deletion contexts
 - 4.1.3 Status Messages: Status updates must be announced to screen readers
+"""
 
+        if "ISO15008" in selected_standards:
+            standards_content += """
 🚗 ISO 15008:2017 - Visual Presentation in Vehicles:
 - Character Height: Minimum 16 arc minutes for driving tasks
 - Contrast Ratio: Enhanced requirements for automotive lighting conditions
@@ -113,7 +160,10 @@ Level AA (Standard):
 - Color Coding: Maximum 6 colors for categorical information
 - Glare Control: Minimize reflections and glare in all lighting
 - Font Requirements: Sans-serif fonts recommended for vehicle displays
+"""
 
+        if "NHTSA" in selected_standards:
+            standards_content += """
 🚨 NHTSA Driver Distraction Guidelines:
 - 12-Second Rule: Tasks must be completable in 12 seconds of glances
 - 2-Second Rule: Individual glances must not exceed 2 seconds
@@ -122,7 +172,10 @@ Level AA (Standard):
 - Voice Priority: Encourage voice interaction for complex tasks
 - Emergency Access: Critical functions always accessible
 - Lock-Out Features: Some functions disabled while driving
+"""
 
+        if "SAE J3016" in selected_standards or "SAE" in selected_standards:
+            standards_content += """
 ⚡ SAE J2364 & J2365 - Task Time & Speech Interface:
 - 15-Second Rule: Driver information tasks under 15 seconds
 - Task Complexity: Minimize cognitive load during driving
@@ -130,13 +183,20 @@ Level AA (Standard):
 - Error Recovery: Quick recovery from speech recognition errors
 - Confirmation: Critical actions require confirmation
 - Context Awareness: Adapt interface based on driving conditions
+"""
 
+        if "GTR8" in selected_standards:
+            standards_content += """
 🛡️ GTR No. 8 - Safety & Human-Machine Interface:
 - Safety-Critical Functions: Must remain accessible during system failures
 - Redundancy: Critical information available through multiple channels  
 - Fail-Safe Design: System failures must not compromise safety
 - Driver State Monitoring: Adapt to driver attention/workload
 - Emergency Override: Driver can always override automated systems
+"""
+
+        # Add the rest of the original prompt content
+        standards_content += """
 
 === INFOTAINMENT-SPECIFIC ISSUE TYPES ===
 
@@ -249,44 +309,15 @@ Interaction Methods:
 - "mixed": Multiple interaction methods combined
 
 Your analysis should:
-1. Identify ALL applicable standards violations
+1. Identify violations ONLY for the selected standards: """ + ", ".join(selected_standards) + """
 2. Consider automotive context and safety implications
 3. Provide specific metrics for eyes-off-road time, glance count, task time
 4. Suggest fixes appropriate for infotainment systems
 5. Classify safety criticality appropriately
-6. Consider multiple interaction methods and contexts"""
+6. Consider multiple interaction methods and contexts
+7. Only populate criteria fields for the selected standards - set others to null"""
 
-        # Infotainment-specific issue types
-        self.infotainment_issue_types = [
-            # Visual & Display
-            'inadequate_daylight_contrast', 'inadequate_night_contrast', 'character_too_small_driving',
-            'excessive_visual_complexity', 'poor_glare_control', 'color_dependency_driving',
-            'animation_distraction', 'missing_alt_text', 'low_contrast',
-
-            # Interaction & Control
-            'complex_gesture_while_driving', 'inadequate_touch_targets', 'missing_physical_backup',
-            'steering_wheel_inaccessible', 'voice_command_mismatch', 'accidental_activation',
-            'poor_haptic_feedback', 'missing_label', 'keyboard_trap',
-
-            # Timing & Attention
-            'excessive_task_time', 'excessive_glance_time', 'excessive_glance_count',
-            'no_progress_indication', 'timeout_too_short', 'cognitive_overload',
-
-            # Audio & Voice
-            'inadequate_voice_feedback', 'speech_interference', 'missing_audio_alternatives',
-            'inconsistent_voice_commands', 'no_audio_ducking', 'poor_speech_recognition',
-
-            # Safety & Emergency
-            'blocked_critical_info', 'emergency_function_buried', 'system_failure_unsafe',
-            'driver_trap', 'attention_capture',
-
-            # Context & Adaptation
-            'no_driving_mode_adaptation', 'poor_lighting_adaptation', 'missing_context_awareness',
-            'passenger_driver_confusion',
-
-            # Traditional Web Issues (Enhanced for Infotainment)
-            'aria_issue', 'focus_issue', 'semantic_issue', 'heading_structure', 'table_headers'
-        ]
+        return prompt + standards_content
 
     async def analyze_with_openai(self, file_contents: Dict[str, str], model: str) -> List[Dict]:
         """Analyze code using OpenAI models with infotainment focus."""
@@ -294,6 +325,9 @@ Your analysis should:
             raise Exception("OpenAI API key not configured")
 
         all_issues = []
+
+        # Get the appropriate system prompt based on selected standards
+        system_prompt = self._get_system_prompt_for_standards(self.current_selected_standards)
 
         for filename, content in file_contents.items():
             try:
@@ -311,7 +345,7 @@ Your analysis should:
                 response = await self.openai_client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": self.system_prompt},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user",
                          "content": f"Analyze this {filename} file for infotainment accessibility issues:\n\n{context_prompt}\n\n{code_with_lines}"}
                     ],
@@ -345,6 +379,9 @@ Your analysis should:
 
         all_issues = []
 
+        # Get the appropriate system prompt based on selected standards
+        system_prompt = self._get_system_prompt_for_standards(self.current_selected_standards)
+
         # Map requested model to actual Anthropic model
         anthropic_model_map = {
             "claude-opus-4": "claude-3-5-sonnet-20241022",
@@ -372,7 +409,7 @@ Your analysis should:
                     model=actual_model,
                     max_tokens=8000,
                     temperature=0.1,
-                    system=self.system_prompt,
+                    system=system_prompt,
                     messages=[
                         {
                             "role": "user",
@@ -415,6 +452,10 @@ Your analysis should:
 
         print(f"Starting DeepSeek V3 infotainment analysis...")
         all_issues = []
+
+        # Get the appropriate system prompt based on selected standards
+        system_prompt = self._get_system_prompt_for_standards(self.current_selected_standards)
+
         async with httpx.AsyncClient(timeout=180.0) as client:
             for filename, content in file_contents.items():
                 if not self._is_infotainment_file(filename):
@@ -435,7 +476,7 @@ Your analysis should:
                         json={
                             "model": "deepseek-chat",
                             "messages": [
-                                {"role": "system", "content": self.system_prompt},
+                                {"role": "system", "content": system_prompt},
                                 {"role": "user",
                                  "content": f"Analyze this {filename} file for comprehensive infotainment accessibility issues:\n\n{context_prompt}\n\n{code_with_lines}"}
                             ],
@@ -547,6 +588,31 @@ undo functionality, and prevention of accidental changes while driving."""
 Focus on: Overall system accessibility, consistent interaction patterns, 
 voice control integration, and comprehensive WCAG compliance for automotive context."""
 
+    def _filter_issue_by_standards(self, issue: Dict) -> None:
+        """Filter issue criteria based on selected standards."""
+        if not hasattr(self, 'current_selected_standards'):
+            return
+
+        selected = self.current_selected_standards
+
+        # Only keep criteria for selected standards
+        if "WCAG 2.2" not in selected and "WCAG" not in selected:
+            issue["wcag_criteria"] = None
+            issue["wcag_level"] = None
+            issue["wcag_principle"] = None
+
+        if "ISO15008" not in selected:
+            issue["iso15008_criteria"] = None
+
+        if "NHTSA" not in selected:
+            issue["nhtsa_criteria"] = None
+
+        if "SAE" not in selected and "SAE J3016" not in selected:
+            issue["sae_criteria"] = None
+
+        if "GTR8" not in selected:
+            issue["gtr8_criteria"] = None
+
     def _enhance_issue_data(self, issue: Dict, filename: str) -> None:
         """Enhance issue data with additional infotainment-specific information."""
         # Ensure required fields exist with defaults
@@ -572,6 +638,9 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
 
         if "interaction_method" not in issue:
             issue["interaction_method"] = self._determine_interaction_method(issue, filename)
+
+        # Filter based on selected standards
+        self._filter_issue_by_standards(issue)
 
     def _estimate_eyes_off_road_time(self, issue: Dict) -> float:
         """Estimate eyes-off-road time based on issue type and complexity."""
@@ -789,7 +858,8 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.analyze_with_anthropic_sync, file_contents, model)
 
-    async def analyze_code(self, file_contents: Dict[str, str], model: str, analysis_id: str) -> List[Dict]:
+    async def analyze_code(self, file_contents: Dict[str, str], model: str, analysis_id: str,
+                           selected_standards: List[str] = None) -> List[Dict]:
         """
         Analyze code for infotainment accessibility issues using specified LLM model.
 
@@ -797,6 +867,7 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
             file_contents: Dictionary mapping filenames to their content
             model: LLM model to use ('gpt-4o', 'claude-opus-4', 'Deepseek-V3')
             analysis_id: Unique identifier for this analysis
+            selected_standards: List of standards to check against
 
         Returns:
             List of infotainment accessibility issues found
@@ -804,6 +875,10 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
         try:
             print(f"Starting infotainment accessibility analysis with {model} for analysis {analysis_id}")
             print(f"Files to analyze: {list(file_contents.keys())}")
+            print(f"Selected standards: {selected_standards}")
+
+            # Store selected standards for filtering
+            self.current_selected_standards = selected_standards or ["WCAG 2.2", "ISO15008", "NHTSA"]
 
             if model == "gpt-4o":
                 return await self.analyze_with_openai(file_contents, "gpt-4o")

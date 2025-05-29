@@ -48,6 +48,7 @@ import {
 } from 'react-icons/fa';
 
 import { VehicleContextCard, StandardsSelectionCard, ModelSelectionCard } from './components';
+import { JumpToCodeModal } from './JumpToCodeModal';
 
 // Helper functions
 const getSeverityColor = (severity) => {
@@ -283,6 +284,8 @@ export const ResultsTab = ({
   onDiffOpen,
   currentAnalysis
 }) => {
+  const [isJumpOpen, setIsJumpOpen] = useState(false);
+const [jumpData, setJumpData] = useState({ file: '', content: '', line: 1 });
   if (loading && analysisStatus === 'analyzing') {
     return (
       <VStack spacing={4}>
@@ -291,6 +294,7 @@ export const ResultsTab = ({
           This may take several minutes for comprehensive automotive standards analysis
         </Text>
         <Progress size="lg" isIndeterminate width="full" />
+
       </VStack>
     );
   }
@@ -500,21 +504,40 @@ export const ResultsTab = ({
                     </HStack>
                   </Td>
                   <Td>
-                    <HStack>
-                      <IconButton
-                        icon={<FaEye />}
-                        size="sm"
-                        onClick={() => {
-                          setCodeView({ show: true, issue });
-                          onDiffOpen();
-                        }}
-                        title="View code diff"
-                      />
-                      {issue.fix_applied && (
-                        <Badge colorScheme="green" fontSize="xs">Applied</Badge>
-                      )}
-                    </HStack>
-                  </Td>
+  <VStack align="start">
+    <HStack>
+      <IconButton
+        icon={<FaEye />}
+        size="sm"
+        onClick={() => {
+          setCodeView({ show: true, issue });
+          onDiffOpen();
+        }}
+        title="View code diff"
+      />
+      <Button
+        size="sm"
+        colorScheme="blue"
+        variant="outline"
+        onClick={() => {
+          const fileContent = currentAnalysis.file_contents[issue.file];
+          setJumpData({
+            file: issue.file,
+            content: fileContent,
+            line: issue.line || 1
+          });
+          setIsJumpOpen(true);
+        }}
+      >
+        Jump to Code
+      </Button>
+    </HStack>
+    {issue.fix_applied && (
+      <Badge colorScheme="green" fontSize="xs">Applied</Badge>
+    )}
+  </VStack>
+</Td>
+
                 </Tr>
               ))}
             </Tbody>
@@ -551,6 +574,14 @@ export const ResultsTab = ({
             );
           })}
         </Grid>
+        <JumpToCodeModal
+  isOpen={isJumpOpen}
+  onClose={() => setIsJumpOpen(false)}
+  file={jumpData.file}
+  content={jumpData.content}
+  line={jumpData.line}
+/>
+
       </VStack>
     );
   }
