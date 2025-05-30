@@ -7,10 +7,7 @@ import {
   Text,
   Button,
   Input,
-  Textarea,
-  Select,
   useToast,
-  Spinner,
   Progress,
   Badge,
   Tabs,
@@ -35,7 +32,6 @@ import {
   CardBody,
   CardHeader,
   Heading,
-  Divider,
   Alert,
   AlertIcon,
   AlertTitle,
@@ -56,9 +52,10 @@ import {
   Tag,
   TagLabel,
   Wrap,
-  WrapItem
+  WrapItem,
+  Code
 } from '@chakra-ui/react';
-import { WarningIcon, CheckIcon, InfoIcon } from '@chakra-ui/icons';
+import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon } from '@chakra-ui/icons';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -84,13 +81,17 @@ function App() {
   const [selectedModels, setSelectedModels] = useState([]);
   const [selectedStandards, setSelectedStandards] = useState(['WCAG 2.2', 'ISO15008', 'NHTSA']);
 
+  // Fix tracking state
+  const [appliedFixes, setAppliedFixes] = useState(new Set());
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
   // Available options
   const [availableModels, setAvailableModels] = useState([]);
   const [availableStandards, setAvailableStandards] = useState([]);
 
   const toast = useToast();
 
-  // Enhanced token validation on startup
+  // Token validation on startup
   useEffect(() => {
     const validateToken = async () => {
       if (token) {
@@ -108,7 +109,6 @@ function App() {
               duration: 5000
             });
           } else if (response.ok) {
-            // Token is valid, fetch initial data
             fetchAvailableModels();
             fetchAvailableStandards();
             fetchAnalyses();
@@ -127,7 +127,7 @@ function App() {
     validateToken();
   }, [token]);
 
-  // Enhanced logout with cleanup
+  // Logout with cleanup
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -139,9 +139,11 @@ function App() {
     setInfotainmentInsights(null);
     setFiles([]);
     setSelectedModels([]);
+    setAppliedFixes(new Set());
+    setHasUnsavedChanges(false);
   };
 
-  // Enhanced authentication functions
+  // Authentication functions
   const handleAuth = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -170,7 +172,6 @@ function App() {
         setUser({ id: data.user_id, email });
         onLoginClose();
 
-        // Verify token immediately and fetch initial data
         try {
           await Promise.all([
             fetchAvailableModels(),
@@ -190,7 +191,6 @@ function App() {
           });
         }
       } else {
-        // Handle specific error cases
         if (data.detail?.includes('User not found')) {
           toast({
             title: 'Session expired - please register again',
@@ -220,7 +220,7 @@ function App() {
     }
   };
 
-  // Enhanced data fetching with error handling
+  // Data fetching functions
   const fetchAvailableModels = async () => {
     try {
       const response = await fetch(`${API_URL}/models`);
@@ -267,7 +267,7 @@ function App() {
     }
   };
 
-  // Enhanced file upload with better error handling
+  // File upload
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files);
     setFiles(files);
@@ -303,12 +303,11 @@ function App() {
           context_type: data.context_type
         });
         setAnalysisStatus('uploaded');
-
-        // Refresh analyses list
+        setAppliedFixes(new Set());
+        setHasUnsavedChanges(false);
         fetchAnalyses();
       } else {
         const errorData = await response.json();
-
         if (response.status === 401) {
           toast({
             title: 'Session expired - please login again',
@@ -336,7 +335,7 @@ function App() {
     }
   };
 
-  // Enhanced analysis function
+  // Start analysis
   const startAnalysis = async () => {
     if (!currentAnalysis || selectedModels.length === 0) {
       toast({
@@ -371,11 +370,9 @@ function App() {
           duration: 5000
         });
 
-        // Poll for results
         pollAnalysisStatus(currentAnalysis.id);
       } else {
         const errorData = await response.json();
-
         if (response.status === 401) {
           logout();
         } else {
@@ -419,7 +416,11 @@ function App() {
             setIssues(data.issues || []);
             setAnalysisStatus('completed');
 
-            // Fetch infotainment-specific insights
+            setCurrentAnalysis(prev => ({
+              ...prev,
+              file_contents: data.file_contents
+            }));
+
             fetchInfotainmentInsights(analysisId);
 
             toast({
@@ -428,7 +429,6 @@ function App() {
               status: 'success'
             });
 
-            // Refresh analyses list
             fetchAnalyses();
           } else if (data.analysis.status === 'failed') {
             setAnalysisStatus('failed');
@@ -438,20 +438,19 @@ function App() {
               status: 'error'
             });
           } else {
-            // Still analyzing, poll again
             setTimeout(poll, 3000);
           }
         }
       } catch (error) {
         console.error('Polling error:', error);
-        setTimeout(poll, 5000); // Retry after longer delay
+        setTimeout(poll, 5000);
       }
     };
 
     poll();
   };
 
-  // Fetch infotainment insights
+  // Fetch insights
   const fetchInfotainmentInsights = async (analysisId) => {
     try {
       const response = await fetch(`${API_URL}/analysis/${analysisId}/infotainment-insights`, {
@@ -467,78 +466,10 @@ function App() {
     }
   };
 
-  // Load previous analysis
-  const loadAnalysis = async (analysisId) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_URL}/analysis/${analysisId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.status === 401) {
-        logout();
-        return;
-      }
-
-      if (response.ok) {
-        const data = await response.json();
-        setCurrentAnalysis({
-          id: analysisId,
-          files: data.analysis.file_names || [],
-          context_type: data.analysis.context_type
-        });
-        setIssues(data.issues || []);
-        setAnalysisStatus(data.analysis.status);
-        setSelectedModels(data.analysis.models_used || []);
-        setSelectedStandards(data.analysis.standards_applied || []);
-
-        // Fetch insights if analysis is completed
-        if (data.analysis.status === 'completed') {
-          fetchInfotainmentInsights(analysisId);
-        }
-
-        toast({
-          title: 'Analysis loaded',
-          description: `Loaded analysis with ${data.issues?.length || 0} issues`,
-          status: 'info'
-        });
-      }
-    } catch (error) {
-      console.error('Error loading analysis:', error);
-      toast({ title: 'Error loading analysis', status: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Rate issue
-  const rateIssue = async (issueId, rating) => {
-    try {
-      const response = await fetch(`${API_URL}/issue/${issueId}/rate`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ rating })
-      });
-
-      if (response.ok) {
-        // Update local state
-        setIssues(issues.map(issue =>
-          issue.id === issueId ? { ...issue, user_rating: rating } : issue
-        ));
-
-        toast({ title: 'Rating saved', status: 'success', duration: 2000 });
-      }
-    } catch (error) {
-      console.error('Error rating issue:', error);
-    }
-  };
-
   // Apply fix
   const applyFix = async (issueId) => {
     try {
+      setLoading(true);
       const response = await fetch(`${API_URL}/issue/${issueId}/apply`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -549,19 +480,98 @@ function App() {
           issue.id === issueId ? { ...issue, fix_applied: true } : issue
         ));
 
-        toast({ title: 'Fix applied', status: 'success', duration: 2000 });
+        setAppliedFixes(prev => new Set([...prev, issueId]));
+        setHasUnsavedChanges(true);
+
+        toast({
+          title: 'Fix applied successfully',
+          description: 'The code has been updated with the suggested fix',
+          status: 'success',
+          duration: 3000
+        });
+      } else {
+        const errorData = await response.json();
+        toast({
+          title: 'Failed to apply fix',
+          description: errorData.detail,
+          status: 'error'
+        });
       }
     } catch (error) {
       console.error('Error applying fix:', error);
+      toast({
+        title: 'Network error',
+        description: 'Failed to apply fix due to network error',
+        status: 'error'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Generate report
-  const generateReport = async () => {
-    if (!currentAnalysis) return;
+  // Undo fix
+  const undoFix = async (issueId) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/issue/${issueId}/undo`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        setIssues(issues.map(issue =>
+          issue.id === issueId ? { ...issue, fix_applied: false } : issue
+        ));
+
+        setAppliedFixes(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(issueId);
+          return newSet;
+        });
+
+        const remainingFixes = appliedFixes.size - 1;
+        setHasUnsavedChanges(remainingFixes > 0);
+
+        toast({
+          title: 'Fix undone successfully',
+          description: 'The original code has been restored',
+          status: 'success',
+          duration: 3000
+        });
+      } else {
+        const errorData = await response.json();
+        toast({
+          title: 'Failed to undo fix',
+          description: errorData.detail,
+          status: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('Error undoing fix:', error);
+      toast({
+        title: 'Network error',
+        description: 'Failed to undo fix due to network error',
+        status: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Download updated files
+  const downloadUpdatedFiles = async () => {
+    if (!currentAnalysis || appliedFixes.size === 0) {
+      toast({
+        title: 'No fixes to download',
+        description: 'Apply some fixes first before downloading',
+        status: 'warning'
+      });
+      return;
+    }
 
     try {
-      const response = await fetch(`${API_URL}/analysis/${currentAnalysis.id}/report`, {
+      setLoading(true);
+      const response = await fetch(`${API_URL}/analysis/${currentAnalysis.id}/download-updated`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -570,21 +580,38 @@ function App() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `infotainment_accessibility_report_${currentAnalysis.id}.pdf`;
+        a.download = `updated_infotainment_files_${currentAnalysis.id}.zip`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
 
-        toast({ title: 'Report generated successfully', status: 'success' });
+        toast({
+          title: 'Updated files downloaded',
+          description: `ZIP file contains ${appliedFixes.size} applied fixes`,
+          status: 'success'
+        });
+      } else {
+        const errorData = await response.json();
+        toast({
+          title: 'Download failed',
+          description: errorData.detail,
+          status: 'error'
+        });
       }
     } catch (error) {
-      console.error('Error generating report:', error);
-      toast({ title: 'Error generating report', status: 'error' });
+      console.error('Error downloading files:', error);
+      toast({
+        title: 'Download error',
+        description: 'Failed to download updated files',
+        status: 'error'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Render issue severity badge
+  // Get severity color
   const getSeverityColor = (severity) => {
     switch (severity) {
       case 'critical': return 'red';
@@ -595,7 +622,7 @@ function App() {
     }
   };
 
-  // Render main application
+  // Render login screen
   if (!token) {
     return (
       <ChakraProvider>
@@ -639,7 +666,6 @@ function App() {
             </CardBody>
           </Card>
 
-          {/* Auth Modal */}
           <Modal isOpen={isLoginOpen} onClose={onLoginClose}>
             <ModalOverlay />
             <ModalContent>
@@ -682,6 +708,7 @@ function App() {
     );
   }
 
+  // Main application
   return (
     <ChakraProvider>
       <Box minHeight="100vh" bg="gray.50">
@@ -693,6 +720,11 @@ function App() {
             </Heading>
             <Spacer />
             <HStack spacing={4}>
+              {hasUnsavedChanges && (
+                <Badge colorScheme="orange" variant="solid">
+                  {appliedFixes.size} fixes applied
+                </Badge>
+              )}
               <Text fontSize="sm" color="gray.600">
                 {user?.email}
               </Text>
@@ -865,23 +897,31 @@ function App() {
                         </StatNumber>
                       </Stat>
                       <Stat>
-                        <StatLabel>Fixed</StatLabel>
+                        <StatLabel>Fixes Applied</StatLabel>
                         <StatNumber color="green.500">
-                          {issues.filter(i => i.fix_applied).length}
+                          {appliedFixes.size}
                         </StatNumber>
                       </Stat>
                     </SimpleGrid>
 
                     {/* Action Buttons */}
                     <HStack>
-                      <Button onClick={generateReport} variant="outline">
-                        Generate Report
-                      </Button>
+                      {hasUnsavedChanges && (
+                        <Button
+                          leftIcon={<DownloadIcon />}
+                          colorScheme="green"
+                          onClick={downloadUpdatedFiles}
+                          isLoading={loading}
+                          loadingText="Preparing..."
+                        >
+                          Download Updated Files ({appliedFixes.size} fixes)
+                        </Button>
+                      )}
                     </HStack>
 
                     {/* Issues List */}
                     <VStack spacing={4} align="stretch">
-                      {issues.map((issue, index) => (
+                      {issues.map((issue) => (
                         <Card key={issue.id} variant={issue.safety_critical ? 'outline' : 'filled'}>
                           <CardBody>
                             <VStack align="stretch" spacing={3}>
@@ -914,158 +954,110 @@ function App() {
                                 <Heading size="sm" mb={2}>{issue.type}</Heading>
                                 <Text mb={3}>{issue.description}</Text>
 
-                                {/* Standards Information */}
-                                {(issue.wcag_criteria?.length > 0 || issue.iso15008_criteria?.length > 0 || issue.nhtsa_criteria?.length > 0 || issue.sae_criteria?.length > 0 || issue.gtr8_criteria?.length > 0) && (
-                                  <Box mb={3}>
-                                    <Text fontSize="sm" fontWeight="bold" mb={1}>Standards Violated:</Text>
-                                    <Wrap>
-                                      {issue.wcag_criteria && issue.wcag_criteria.length > 0 && (
-                                        <WrapItem>
-                                          <Tag size="sm" colorScheme="blue">
-                                            WCAG {issue.wcag_level} - {issue.wcag_principle}
-                                          </Tag>
-                                        </WrapItem>
-                                      )}
-                                      {issue.iso15008_criteria && issue.iso15008_criteria.length > 0 && (
-                                        <WrapItem>
-                                          <Tag size="sm" colorScheme="green">
-                                            ISO 15008
-                                          </Tag>
-                                        </WrapItem>
-                                      )}
-                                      {issue.nhtsa_criteria && issue.nhtsa_criteria.length > 0 && (
-                                        <WrapItem>
-                                          <Tag size="sm" colorScheme="red">
-                                            NHTSA
-                                          </Tag>
-                                        </WrapItem>
-                                      )}
-                                      {issue.sae_criteria && issue.sae_criteria.length > 0 && (
-                                        <WrapItem>
-                                          <Tag size="sm" colorScheme="orange">
-                                            SAE
-                                          </Tag>
-                                        </WrapItem>
-                                      )}
-                                      {issue.gtr8_criteria && issue.gtr8_criteria.length > 0 && (
-                                        <WrapItem>
-                                          <Tag size="sm" colorScheme="purple">
-                                            GTR8
-                                          </Tag>
-                                        </WrapItem>
-                                      )}
-                                    </Wrap>
-                                  </Box>
-                                )}
-
-                                {/* Automotive Metrics */}
-                                {issue.automotive_metrics && (
-                                  <Box mb={3}>
-                                    <Text fontSize="sm" fontWeight="bold" mb={1}>Automotive Metrics:</Text>
-                                    <SimpleGrid columns={[1, 3]} spacing={2}>
-                                      {issue.automotive_metrics.eyes_off_road_time > 0 && (
-                                        <Text fontSize="sm">
-                                          Eyes off road: {issue.automotive_metrics.eyes_off_road_time}s
-                                          {issue.automotive_metrics.eyes_off_road_time > 2.0 && (
-                                            <Badge ml={1} colorScheme="red" size="sm">VIOLATION</Badge>
-                                          )}
-                                        </Text>
-                                      )}
-                                      {issue.automotive_metrics.task_time > 0 && (
-                                        <Text fontSize="sm">
-                                          Task time: {issue.automotive_metrics.task_time}s
-                                          {issue.automotive_metrics.task_time > 12.0 && (
-                                            <Badge ml={1} colorScheme="red" size="sm">VIOLATION</Badge>
-                                          )}
-                                        </Text>
-                                      )}
-                                      {issue.automotive_metrics.glance_count > 0 && (
-                                        <Text fontSize="sm">
-                                          Glances: {issue.automotive_metrics.glance_count}
-                                        </Text>
-                                      )}
-                                    </SimpleGrid>
-                                  </Box>
-                                )}
-
-                                {/* Interaction Method */}
-                                {issue.interaction_method && (
-                                  <Text fontSize="sm" color="gray.600" mb={3}>
-                                    Interaction method: {issue.interaction_method}
-                                  </Text>
-                                )}
-                              </Box>
-
-                              {/* Code Sections */}
-                              {issue.original_code && (
-                                <Accordion allowToggle>
-                                  <AccordionItem>
-                                    <AccordionButton>
-                                      <Box flex="1" textAlign="left">
-                                        View Code & Fix
-                                      </Box>
-                                      <AccordionIcon />
-                                    </AccordionButton>
-                                    <AccordionPanel>
-                                      <VStack align="stretch" spacing={3}>
-                                        <Box>
-                                          <Text fontSize="sm" fontWeight="bold" mb={1}>Original Code:</Text>
-                                          <Box bg="gray.100" p={3} borderRadius="md" overflow="auto">
-                                            <Text fontSize="sm" fontFamily="mono">
-                                              {issue.original_code}
-                                            </Text>
-                                          </Box>
+                                {/* Code Sections */}
+                                {issue.original_code && (
+                                  <Accordion allowToggle>
+                                    <AccordionItem>
+                                      <AccordionButton>
+                                        <Box flex="1" textAlign="left">
+                                          View Code & Fix
                                         </Box>
-
-                                        {issue.suggested_fix && (
+                                        <AccordionIcon />
+                                      </AccordionButton>
+                                      <AccordionPanel>
+                                        <VStack align="stretch" spacing={3}>
                                           <Box>
-                                            <Text fontSize="sm" fontWeight="bold" mb={1}>Suggested Fix:</Text>
-                                            <Box bg="green.50" p={3} borderRadius="md" overflow="auto">
-                                              <Text fontSize="sm" fontFamily="mono">
-                                                {issue.suggested_fix}
-                                              </Text>
+                                            <Box bg="gray.100" p={3} borderRadius="md" overflow="auto">
+                                              <Code fontSize="sm" whiteSpace="pre-wrap">
+                                                {issue.original_code}
+                                              </Code>
                                             </Box>
                                           </Box>
-                                        )}
-                                      </VStack>
-                                    </AccordionPanel>
-                                  </AccordionItem>
-                                </Accordion>
-                              )}
 
-                              {/* Actions */}
-                              <Flex justify="space-between" align="center" pt={2}>
-                                <HStack>
-                                  <Text fontSize="sm">Rate this fix:</Text>
-                                  {[1, 2, 3, 4, 5].map(rating => (
-                                    <Button
-                                      key={rating}
-                                      size="xs"
-                                      variant={issue.user_rating === rating ? "solid" : "outline"}
-                                      colorScheme="yellow"
-                                      onClick={() => rateIssue(issue.id, rating)}
-                                    >
-                                      {rating}
-                                    </Button>
-                                  ))}
-                                </HStack>
+                                          {issue.suggested_fix && (
+                                            <Box>
+                                              <Text fontSize="sm" fontWeight="bold" mb={1}>Suggested Fix:</Text>
+                                              <Box bg="green.50" p={3} borderRadius="md" overflow="auto">
+                                                <Code fontSize="sm" whiteSpace="pre-wrap" color="green.800">
+                                                  {issue.suggested_fix}
+                                                </Code>
+                                              </Box>
+                                            </Box>
+                                          )}
+                                        </VStack>
+                                      </AccordionPanel>
+                                    </AccordionItem>
+                                  </Accordion>
+                                )}
 
-                                <Button
-                                  size="sm"
-                                  colorScheme={issue.fix_applied ? "green" : "blue"}
-                                  variant={issue.fix_applied ? "solid" : "outline"}
-                                  onClick={() => applyFix(issue.id)}
-                                  isDisabled={issue.fix_applied}
-                                  leftIcon={issue.fix_applied ? <CheckIcon /> : undefined}
-                                >
-                                  {issue.fix_applied ? "Applied" : "Apply Fix"}
-                                </Button>
-                              </Flex>
+                                {/* Actions */}
+                                <Flex justify="space-between" align="center" pt={2}>
+                                  <Box />
+                                  <HStack>
+                                    {issue.fix_applied ? (
+                                      <>
+                                        <Badge colorScheme="green" variant="solid">
+                                          <Icon as={CheckIcon} mr={1} />
+                                          Applied
+                                        </Badge>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          colorScheme="orange"
+                                          onClick={() => undoFix(issue.id)}
+                                          isLoading={loading}
+                                          leftIcon={<RepeatIcon />}
+                                        >
+                                          Undo Fix
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        colorScheme="blue"
+                                        onClick={() => applyFix(issue.id)}
+                                        isLoading={loading}
+                                        isDisabled={!issue.suggested_fix}
+                                      >
+                                        Apply Fix
+                                      </Button>
+                                    )}
+                                  </HStack>
+                                </Flex>
+                              </Box>
                             </VStack>
                           </CardBody>
                         </Card>
                       ))}
                     </VStack>
+
+                    {/* Bottom Download Button */}
+                    {hasUnsavedChanges && (
+                      <Card bg="green.50" borderColor="green.200">
+                        <CardBody>
+                          <Flex align="center" justify="space-between">
+                            <VStack align="start" spacing={1}>
+                              <Text fontWeight="bold" color="green.800">
+                                {appliedFixes.size} fixes have been applied to your files
+                              </Text>
+                              <Text fontSize="sm" color="green.600">
+                                Download the updated files to get your fixed code
+                              </Text>
+                            </VStack>
+                            <Button
+                              leftIcon={<DownloadIcon />}
+                              colorScheme="green"
+                              size="lg"
+                              onClick={downloadUpdatedFiles}
+                              isLoading={loading}
+                              loadingText="Preparing ZIP..."
+                            >
+                              Download Updated Files
+                            </Button>
+                          </Flex>
+                        </CardBody>
+                      </Card>
+                    )}
                   </VStack>
                 ) : (
                   <Box textAlign="center" py={10}>
@@ -1078,7 +1070,6 @@ function App() {
               <TabPanel>
                 {infotainmentInsights ? (
                   <VStack spacing={6} align="stretch">
-                    {/* Safety Assessment */}
                     <Card>
                       <CardHeader>
                         <Heading size="md" color="red.600">Safety Assessment</Heading>
@@ -1107,129 +1098,8 @@ function App() {
                             <StatHelpText>Over 12 second rule</StatHelpText>
                           </Stat>
                         </SimpleGrid>
-
-                        {infotainmentInsights.safety_assessment.eyes_off_road_violations.length > 0 && (
-                          <Box mt={4}>
-                            <Text fontWeight="bold" mb={2}>Eyes Off Road Violations:</Text>
-                            {infotainmentInsights.safety_assessment.eyes_off_road_violations.map((violation, index) => (
-                              <Alert key={index} status="warning" mb={2}>
-                                <AlertIcon />
-                                <AlertDescription>
-                                  {violation.file}: {violation.time}s (Limit: 2.0s)
-                                </AlertDescription>
-                              </Alert>
-                            ))}
-                          </Box>
-                        )}
                       </CardBody>
                     </Card>
-
-                    {/* Interaction Analysis */}
-                    <Card>
-                      <CardHeader>
-                        <Heading size="md" color="blue.600">Interaction Analysis</Heading>
-                      </CardHeader>
-                      <CardBody>
-                        <SimpleGrid columns={[2, 4]} spacing={4}>
-                          <Stat>
-                            <StatLabel>Touch Issues</StatLabel>
-                            <StatNumber>{infotainmentInsights.interaction_analysis.touch_issues}</StatNumber>
-                          </Stat>
-                          <Stat>
-                            <StatLabel>Voice Issues</StatLabel>
-                            <StatNumber>{infotainmentInsights.interaction_analysis.voice_issues}</StatNumber>
-                          </Stat>
-                          <Stat>
-                            <StatLabel>Button Issues</StatLabel>
-                            <StatNumber>{infotainmentInsights.interaction_analysis.physical_button_issues}</StatNumber>
-                          </Stat>
-                          <Stat>
-                            <StatLabel>Steering Wheel Issues</StatLabel>
-                            <StatNumber>{infotainmentInsights.interaction_analysis.steering_wheel_issues}</StatNumber>
-                          </Stat>
-                        </SimpleGrid>
-                      </CardBody>
-                    </Card>
-
-                    {/* Standards Compliance */}
-                    <Card>
-                      <CardHeader>
-                        <Heading size="md" color="green.600">Standards Compliance</Heading>
-                      </CardHeader>
-                      <CardBody>
-                        <SimpleGrid columns={[1, 2]} spacing={6}>
-                          <Box>
-                            <Text fontWeight="bold" mb={2}>WCAG Violations</Text>
-                            <VStack align="stretch" spacing={2}>
-                              <Flex justify="space-between">
-                                <Text>Level A:</Text>
-                                <Badge colorScheme="red">
-                                  {infotainmentInsights.standards_compliance.wcag_a_violations}
-                                </Badge>
-                              </Flex>
-                              <Flex justify="space-between">
-                                <Text>Level AA:</Text>
-                                <Badge colorScheme="orange">
-                                  {infotainmentInsights.standards_compliance.wcag_aa_violations}
-                                </Badge>
-                              </Flex>
-                              <Flex justify="space-between">
-                                <Text>Level AAA:</Text>
-                                <Badge colorScheme="yellow">
-                                  {infotainmentInsights.standards_compliance.wcag_aaa_violations}
-                                </Badge>
-                              </Flex>
-                            </VStack>
-                          </Box>
-
-                          <Box>
-                            <Text fontWeight="bold" mb={2}>Automotive Standards</Text>
-                            <VStack align="stretch" spacing={2}>
-                              <Flex justify="space-between">
-                                <Text>ISO 15008:</Text>
-                                <Badge colorScheme="blue">
-                                  {infotainmentInsights.standards_compliance.iso15008_issues}
-                                </Badge>
-                              </Flex>
-                              <Flex justify="space-between">
-                                <Text>NHTSA:</Text>
-                                <Badge colorScheme="red">
-                                  {infotainmentInsights.standards_compliance.nhtsa_issues}
-                                </Badge>
-                              </Flex>
-                            </VStack>
-                          </Box>
-                        </SimpleGrid>
-                      </CardBody>
-                    </Card>
-
-                    {/* Recommendations */}
-                    {infotainmentInsights.recommendations.length > 0 && (
-                      <Card>
-                        <CardHeader>
-                          <Heading size="md" color="purple.600">Recommendations</Heading>
-                        </CardHeader>
-                        <CardBody>
-                          <VStack align="stretch" spacing={3}>
-                            {infotainmentInsights.recommendations.map((rec, index) => (
-                              <Alert
-                                key={index}
-                                status={rec.priority === 'critical' ? 'error' :
-                                       rec.priority === 'high' ? 'warning' : 'info'}
-                              >
-                                <AlertIcon />
-                                <Box>
-                                  <AlertTitle>
-                                    {rec.category.toUpperCase()} - {rec.priority.toUpperCase()} Priority
-                                  </AlertTitle>
-                                  <AlertDescription>{rec.message}</AlertDescription>
-                                </Box>
-                              </Alert>
-                            ))}
-                          </VStack>
-                        </CardBody>
-                      </Card>
-                    )}
                   </VStack>
                 ) : (
                   <Box textAlign="center" py={10}>
@@ -1243,7 +1113,7 @@ function App() {
                 {analyses.length > 0 ? (
                   <VStack spacing={4} align="stretch">
                     {analyses.map(analysis => (
-                      <Card key={analysis.id} cursor="pointer" onClick={() => loadAnalysis(analysis.id)}>
+                      <Card key={analysis.id} cursor="pointer">
                         <CardBody>
                           <Flex justify="space-between" align="center">
                             <VStack align="start" spacing={1}>
@@ -1262,13 +1132,7 @@ function App() {
                               <Text fontSize="sm" color="gray.600">
                                 {new Date(analysis.created_at).toLocaleString()}
                               </Text>
-                              {analysis.models && (
-                                <Text fontSize="sm" color="gray.500">
-                                  Models: {analysis.models.join(', ')}
-                                </Text>
-                              )}
                             </VStack>
-
                             <VStack align="end" spacing={1}>
                               <Text fontSize="sm">
                                 {analysis.context_type || 'infotainment'}

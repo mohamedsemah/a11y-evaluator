@@ -23,3 +23,15 @@ zipfile36==0.1.3
 python-dateutil==2.8.2
 dotenv
 asyncio
+# Additional dependencies for code fix application
+regex==2023.12.25  # For advanced pattern matching in code fixes
+beautifulsoup4==4.12.2  # For HTML parsing if needed
+lxml==4.9.3  # XML parsing support
+ast-tools==0.1.0  # AST manipulation for better code fixes (optional)
+
+# Enhanced file handling
+chardet==5.2.0  # Character encoding detection
+python-magic-bin==0.4.14  # File type detection (Windows-compatible)
+pathspec==0.11.2  # Path pattern matching
+# Replicate API for Llama Maverick
+replicate==0.15.4  # Official Replicate Python client (alternative to httpx calls)

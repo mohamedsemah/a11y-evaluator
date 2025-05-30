@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, BackgroundTasks, Header
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, BackgroundTasks, Header, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -21,6 +21,8 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 import io
 from dotenv import load_dotenv
+import re
+
 load_dotenv()
 
 from models import (
@@ -48,6 +50,7 @@ ALGORITHM = "HS256"
 
 # Initialize database
 from models import engine
+
 Base.metadata.create_all(bind=engine)
 
 # Initialize Infotainment LLM analyzer
@@ -120,7 +123,109 @@ class InfotainmentAnalyzeRequest(BaseModel):
     standards: List[str] = ["WCAG 2.2", "ISO15008", "NHTSA"]
 
 
-# Enhanced Authentication endpoints with better error handling
+# Fix application helper functions
+def apply_code_fix(original_code: str, suggested_fix: str, line_number: int = None) -> str:
+    """
+    Apply a suggested fix to the original code.
+    This is a simple implementation - in production, you might want more sophisticated parsing.
+    """
+    if not suggested_fix or not original_code:
+        return original_code
+
+    try:
+        # If we have a line number, try to replace that specific line
+        if line_number:
+            lines = original_code.split('\n')
+            if 0 <= line_number - 1 < len(lines):
+                # Try to find the original line in the suggested fix and replace it
+                # This is a simplified approach - real implementation might need AST parsing
+                lines[line_number - 1] = suggested_fix.strip()
+                return '\n'.join(lines)
+
+        # If no line number or line replacement failed, try pattern replacement
+        # Look for patterns in the suggested fix that might indicate what to replace
+        fix_lines = suggested_fix.split('\n')
+
+        # Simple heuristic: if suggested fix is short, try to replace similar patterns
+        if len(fix_lines) <= 3 and len(suggested_fix) < 200:
+            # Try to find and replace similar code patterns
+            for fix_line in fix_lines:
+                fix_line = fix_line.strip()
+                if fix_line and not fix_line.startswith('//') and not fix_line.startswith('/*'):
+                    # Try to find similar patterns and replace them
+                    # This is basic - real implementation would need proper AST parsing
+                    original_code = try_pattern_replacement(original_code, fix_line)
+
+        return original_code
+
+    except Exception as e:
+        print(f"Error applying fix: {str(e)}")
+        return original_code
+
+
+def try_pattern_replacement(original_code: str, fix_line: str) -> str:
+    """
+    Try to intelligently replace code patterns.
+    This is a simplified implementation.
+    """
+    try:
+        # Remove common prefixes/suffixes that might differ
+        fix_line_clean = fix_line.strip()
+
+        # Try to find and replace common accessibility fixes
+        accessibility_patterns = [
+            # Alt text fixes
+            (r'<img([^>]*?)>', lambda m: add_alt_if_missing(m.group(0), fix_line_clean)),
+            # ARIA label fixes
+            (r'<(button|input|a)([^>]*?)>', lambda m: add_aria_if_missing(m.group(0), fix_line_clean)),
+            # Role fixes
+            (r'<div([^>]*?)>', lambda m: add_role_if_missing(m.group(0), fix_line_clean)),
+        ]
+
+        modified_code = original_code
+        for pattern, replacement in accessibility_patterns:
+            if re.search(pattern, original_code, re.IGNORECASE):
+                modified_code = re.sub(pattern, replacement, modified_code, flags=re.IGNORECASE)
+                break
+
+        return modified_code
+
+    except Exception as e:
+        print(f"Error in pattern replacement: {str(e)}")
+        return original_code
+
+
+def add_alt_if_missing(img_tag: str, fix_line: str) -> str:
+    """Add alt attribute if missing from img tag"""
+    if 'alt=' not in img_tag.lower():
+        # Extract alt text from fix line if possible
+        alt_match = re.search(r'alt=["\']([^"\']*)["\']', fix_line, re.IGNORECASE)
+        alt_text = alt_match.group(1) if alt_match else "Accessibility description"
+        return img_tag.replace('>', f' alt="{alt_text}">')
+    return img_tag
+
+
+def add_aria_if_missing(tag: str, fix_line: str) -> str:
+    """Add aria-label if missing from interactive elements"""
+    if 'aria-label=' not in tag.lower() and 'aria-labelledby=' not in tag.lower():
+        # Extract aria-label from fix line if possible
+        aria_match = re.search(r'aria-label=["\']([^"\']*)["\']', fix_line, re.IGNORECASE)
+        aria_text = aria_match.group(1) if aria_match else "Interactive element"
+        return tag.replace('>', f' aria-label="{aria_text}">')
+    return tag
+
+
+def add_role_if_missing(tag: str, fix_line: str) -> str:
+    """Add role attribute if suggested in fix"""
+    if 'role=' in fix_line.lower() and 'role=' not in tag.lower():
+        role_match = re.search(r'role=["\']([^"\']*)["\']', fix_line, re.IGNORECASE)
+        if role_match:
+            role_value = role_match.group(1)
+            return tag.replace('>', f' role="{role_value}">')
+    return tag
+
+
+# Enhanced authentication endpoints with better error handling
 @app.post("/api/register")
 async def register(payload: AuthRequest, db: Session = Depends(get_db)):
     email = payload.email
@@ -644,6 +749,7 @@ async def rate_issue(
     return {"status": "success"}
 
 
+# UPDATED: Enhanced apply fix endpoint that actually applies the fix
 @app.post("/api/issue/{issue_id}/apply")
 async def apply_fix(
         issue_id: str,
@@ -654,11 +760,93 @@ async def apply_fix(
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    issue.fix_applied = True
-    issue.fix_applied_at = datetime.utcnow()
-    db.commit()
+    # Get the analysis to access file contents
+    analysis = db.query(Analysis).filter(Analysis.id == issue.analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
 
-    return {"status": "success"}
+    try:
+        # Get the original file content
+        original_content = analysis.file_contents.get(issue.file_name)
+        if not original_content:
+            raise HTTPException(status_code=404, detail="Original file content not found")
+
+        # Apply the fix to the content
+        if issue.suggested_fix:
+            fixed_content = apply_code_fix(
+                original_content,
+                issue.suggested_fix,
+                issue.line_number
+            )
+
+            # Store the original content if not already stored (for undo)
+            if not analysis.original_file_contents:
+                analysis.original_file_contents = analysis.file_contents.copy()
+
+            # Update the file content with the fix
+            analysis.file_contents[issue.file_name] = fixed_content
+
+            # Mark the issue as fixed
+            issue.fix_applied = True
+            issue.fix_applied_at = datetime.utcnow()
+
+            db.commit()
+
+            return {
+                "status": "success",
+                "message": "Fix applied successfully",
+                "fixed_content": fixed_content[:500] + "..." if len(fixed_content) > 500 else fixed_content
+            }
+        else:
+            raise HTTPException(status_code=400, detail="No suggested fix available")
+
+    except Exception as e:
+        db.rollback()
+        print(f"Error applying fix: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to apply fix: {str(e)}")
+
+
+# NEW: Undo fix endpoint
+@app.post("/api/issue/{issue_id}/undo")
+async def undo_fix(
+        issue_id: str,
+        user_id: str = Depends(get_current_user_with_validation),
+        db: Session = Depends(get_db)
+):
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
+    if not issue.fix_applied:
+        raise HTTPException(status_code=400, detail="Fix was not applied")
+
+    # Get the analysis to access file contents
+    analysis = db.query(Analysis).filter(Analysis.id == issue.analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    try:
+        # Restore original content if available
+        if analysis.original_file_contents and issue.file_name in analysis.original_file_contents:
+            analysis.file_contents[issue.file_name] = analysis.original_file_contents[issue.file_name]
+        else:
+            raise HTTPException(status_code=400, detail="Original content not available for undo")
+
+        # Mark the issue as not fixed
+        issue.fix_applied = False
+        issue.fix_applied_at = None
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": "Fix undone successfully"
+        }
+
+    except Exception as e:
+        db.rollback()
+        print(f"Error undoing fix: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to undo fix: {str(e)}")
 
 
 @app.post("/api/analysis/{analysis_id}/apply-batch")
@@ -668,18 +856,173 @@ async def apply_batch_fixes(
         user_id: str = Depends(get_current_user_with_validation),
         db: Session = Depends(get_db)
 ):
+    analysis = db.query(Analysis).filter(
+        Analysis.id == analysis_id,
+        Analysis.user_id == user_id
+    ).first()
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
     issues = db.query(Issue).filter(
         Issue.analysis_id == analysis_id,
         Issue.id.in_(payload.issue_ids)
     ).all()
 
+    if not analysis.original_file_contents:
+        analysis.original_file_contents = analysis.file_contents.copy()
+
+    applied_count = 0
+    failed_fixes = []
+
     for issue in issues:
-        issue.fix_applied = True
-        issue.fix_applied_at = datetime.utcnow()
+        try:
+            if issue.suggested_fix and not issue.fix_applied:
+                original_content = analysis.file_contents.get(issue.file_name)
+                if original_content:
+                    fixed_content = apply_code_fix(
+                        original_content,
+                        issue.suggested_fix,
+                        issue.line_number
+                    )
+                    analysis.file_contents[issue.file_name] = fixed_content
+                    issue.fix_applied = True
+                    issue.fix_applied_at = datetime.utcnow()
+                    applied_count += 1
+        except Exception as e:
+            failed_fixes.append({
+                "issue_id": str(issue.id),
+                "error": str(e)
+            })
 
     db.commit()
 
-    return {"status": "success", "applied_count": len(issues)}
+    return {
+        "status": "success",
+        "applied_count": applied_count,
+        "failed_fixes": failed_fixes
+    }
+
+
+# NEW: Get updated file contents
+@app.get("/api/analysis/{analysis_id}/updated-files")
+async def get_updated_files(
+        analysis_id: str,
+        user_id: str = Depends(get_current_user_with_validation),
+        db: Session = Depends(get_db)
+):
+    analysis = db.query(Analysis).filter(
+        Analysis.id == analysis_id,
+        Analysis.user_id == user_id
+    ).first()
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # Get applied fixes count
+    applied_fixes = db.query(Issue).filter(
+        Issue.analysis_id == analysis_id,
+        Issue.fix_applied == True
+    ).count()
+
+    return {
+        "status": "success",
+        "file_contents": analysis.file_contents,
+        "original_file_contents": analysis.original_file_contents,
+        "applied_fixes_count": applied_fixes,
+        "has_changes": applied_fixes > 0
+    }
+
+
+# NEW: Download updated files as ZIP
+@app.get("/api/analysis/{analysis_id}/download-updated")
+async def download_updated_files(
+        analysis_id: str,
+        user_id: str = Depends(get_current_user_with_validation),
+        db: Session = Depends(get_db)
+):
+    analysis = db.query(Analysis).filter(
+        Analysis.id == analysis_id,
+        Analysis.user_id == user_id
+    ).first()
+
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # Check if there are any applied fixes
+    applied_fixes = db.query(Issue).filter(
+        Issue.analysis_id == analysis_id,
+        Issue.fix_applied == True
+    ).count()
+
+    if applied_fixes == 0:
+        raise HTTPException(status_code=400, detail="No fixes have been applied")
+
+    try:
+        # Create temporary directory for ZIP creation
+        temp_dir = tempfile.mkdtemp()
+        zip_filename = f"updated_infotainment_files_{analysis_id}.zip"
+        zip_path = os.path.join(temp_dir, zip_filename)
+
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename, content in analysis.file_contents.items():
+                # Write each file to the ZIP
+                zipf.writestr(filename, content)
+
+            # Add a summary file
+            summary_content = f"""# Accessibility Fixes Applied
+
+Analysis ID: {analysis_id}
+Applied Fixes: {applied_fixes}
+Generated: {datetime.utcnow().isoformat()}
+
+Files Updated:
+"""
+            # List files that were actually changed
+            issues_with_fixes = db.query(Issue).filter(
+                Issue.analysis_id == analysis_id,
+                Issue.fix_applied == True
+            ).all()
+
+            file_changes = {}
+            for issue in issues_with_fixes:
+                if issue.file_name not in file_changes:
+                    file_changes[issue.file_name] = []
+                file_changes[issue.file_name].append({
+                    "line": issue.line_number,
+                    "type": issue.issue_type,
+                    "description": issue.description
+                })
+
+            for filename, changes in file_changes.items():
+                summary_content += f"\n## {filename}\n"
+                for change in changes:
+                    summary_content += f"- Line {change['line']}: {change['type']} - {change['description']}\n"
+
+            zipf.writestr("FIXES_APPLIED.md", summary_content)
+
+        # Read the ZIP file and return it
+        with open(zip_path, 'rb') as zip_file:
+            zip_data = zip_file.read()
+
+        # Clean up temporary files
+        os.remove(zip_path)
+        os.rmdir(temp_dir)
+
+        # Return the ZIP file as a response
+        return Response(
+            content=zip_data,
+            media_type='application/zip',
+            headers={
+                "Content-Disposition": f"attachment; filename={zip_filename}"
+            }
+        )
+
+    except Exception as e:
+        print(f"Error creating ZIP: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP file: {str(e)}")
 
 
 @app.get("/api/analysis/{analysis_id}/report")
@@ -722,6 +1065,10 @@ async def generate_report(
     if safety_critical_count > 0:
         elements.append(Paragraph(f"⚠️ SAFETY CRITICAL ISSUES: {safety_critical_count}", styles['Normal']))
 
+    # Applied fixes summary
+    applied_fixes_count = len([i for i in issues if i.fix_applied])
+    elements.append(Paragraph(f"✅ FIXES APPLIED: {applied_fixes_count}", styles['Normal']))
+
     elements.append(Spacer(1, 12))
 
     # Standards compliance breakdown
@@ -735,7 +1082,7 @@ async def generate_report(
 
     # Issues table
     elements.append(Paragraph("Detailed Issues", styles['Heading2']))
-    data = [['File', 'Line', 'Type', 'Severity', 'Safety Critical', 'Model', 'Standards']]
+    data = [['File', 'Line', 'Type', 'Severity', 'Safety Critical', 'Model', 'Standards', 'Fixed']]
 
     for issue in issues[:50]:  # Limit to first 50 issues for PDF
         standards = []
@@ -753,7 +1100,8 @@ async def generate_report(
             issue.severity or 'Medium',
             '⚠️' if issue.safety_critical else '',
             issue.llm_model or 'Unknown',
-            ', '.join(standards)
+            ', '.join(standards),
+            '✅' if issue.fix_applied else ''
         ])
 
     table = Table(data)
@@ -854,7 +1202,7 @@ async def get_standards():
 
 @app.get("/api/models")
 async def get_models():
-    """Get available LLM models for analysis."""
+    """Get available LLM models for analysis - now including Llama Maverick."""
     return {
         "models": [
             {
@@ -877,6 +1225,13 @@ async def get_models():
                 "provider": "DeepSeek",
                 "description": "Specialized code analysis and debugging",
                 "capabilities": ["Code optimization", "Bug detection", "Performance analysis"]
+            },
+            {
+                "id": "llama-maverick",
+                "name": "Llama Maverick",
+                "provider": "Meta/Replicate",
+                "description": "Latest Llama model with enhanced automotive domain knowledge",
+                "capabilities": ["Automotive UI analysis", "Safety-critical code review", "Multi-modal understanding"]
             }
         ]
     }

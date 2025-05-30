@@ -37,14 +37,15 @@ class User(Base):
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete-orphan")
 
 
-# Enhanced Analysis model without vehicle_context
+# Enhanced Analysis model with original file contents storage
 class Analysis(Base):
     __tablename__ = "analyses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     file_names = Column(JSON, nullable=False)  # List of file names
-    file_contents = Column(JSON, nullable=False)  # Dict of file contents
+    file_contents = Column(JSON, nullable=False)  # Dict of current file contents (with fixes applied)
+    original_file_contents = Column(JSON)  # Dict of original file contents (for undo functionality)
     selected_models = Column(JSON, default=list)  # List of LLM models used
     selected_standards = Column(JSON, default=list)  # List of accessibility standards
 
@@ -105,7 +106,7 @@ class Issue(Base):
     context_conditions = Column(JSON)  # lighting, driving_mode, speed, etc.
     interaction_method = Column(String)  # touch, voice, physical_button, steering_wheel
 
-    # User feedback
+    # User feedback and fix tracking
     user_rating = Column(Integer)  # 1-5 rating of fix quality
     fix_applied = Column(Boolean, default=False)
     fix_applied_at = Column(DateTime)
@@ -255,6 +256,7 @@ def create_infotainment_analysis(
             user_id=user_id,
             file_names=list(file_contents.keys()),
             file_contents=file_contents,
+            original_file_contents=None,  # Will be set when first fix is applied
             selected_models=selected_models,
             selected_standards=selected_standards,
             context_type="infotainment",
@@ -347,6 +349,7 @@ def get_infotainment_analysis_summary(db: Session, analysis_id: str) -> Optional
         # Calculate comprehensive statistics
         total_issues = len(issues)
         safety_critical_count = len([i for i in issues if i.safety_critical])
+        applied_fixes_count = len([i for i in issues if i.fix_applied])
 
         # Severity breakdown
         severity_breakdown = {}
@@ -418,11 +421,14 @@ def get_infotainment_analysis_summary(db: Session, analysis_id: str) -> Optional
                 "file_count": len(analysis.file_names),
                 "models_used": analysis.selected_models,
                 "standards_applied": analysis.selected_standards,
-                "context_type": analysis.context_type
+                "context_type": analysis.context_type,
+                "has_applied_fixes": applied_fixes_count > 0,
+                "applied_fixes_count": applied_fixes_count
             },
             "issue_summary": {
                 "total_issues": total_issues,
                 "safety_critical_count": safety_critical_count,
+                "applied_fixes_count": applied_fixes_count,
                 "severity_breakdown": severity_breakdown,
                 "wcag_level_breakdown": wcag_level_breakdown,
                 "standards_breakdown": standards_breakdown,
@@ -570,3 +576,59 @@ def create_tables():
 
 if __name__ == "__main__":
     create_tables()
+
+
+# Add this to the bottom of your models.py file
+
+def run_migration_if_needed():
+    """
+    Check if migration is needed and run it automatically
+    This will add the original_file_contents column if it doesn't exist
+    """
+    from sqlalchemy import text
+
+    try:
+        db = SessionLocal()
+
+        # Check if column exists
+        result = db.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name='analyses' AND column_name='original_file_contents';
+        """)).fetchone()
+
+        if not result:
+            print("🔄 Running database migration: Adding original_file_contents column...")
+
+            # Add the column
+            db.execute(text("ALTER TABLE analyses ADD COLUMN original_file_contents JSON;"))
+
+            # Add indexes for better performance
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses(status);"))
+            db.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_analyses_user_created ON analyses(user_id, created_at DESC);"))
+
+            db.commit()
+            print("✅ Migration completed successfully!")
+        else:
+            print("✅ Database schema is up to date")
+
+        db.close()
+
+    except Exception as e:
+        print(f"❌ Migration error: {str(e)}")
+        if 'db' in locals():
+            db.rollback()
+            db.close()
+
+
+# Run migration check when models.py is imported
+if __name__ == "__main__":
+    create_tables()
+    run_migration_if_needed()
+else:
+    # Auto-run migration check when imported
+    try:
+        run_migration_if_needed()
+    except Exception as e:
+        print(f"Warning: Could not check/run migration: {e}")

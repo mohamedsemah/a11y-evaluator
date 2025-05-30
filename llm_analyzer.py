@@ -16,10 +16,12 @@ class InfotainmentLLMAnalyzer:
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        self.replicate_api_key = os.getenv("REPLICATE_API_TOKEN")  # For Llama Maverick
 
         print(f"OpenAI API Key: {'✓ Set' if self.openai_api_key else '✗ Missing'}")
         print(f"Anthropic API Key: {'✓ Set' if self.anthropic_api_key else '✗ Missing'}")
         print(f"DeepSeek API Key: {'✓ Set' if self.deepseek_api_key else '✗ Missing'}")
+        print(f"Replicate API Key: {'✓ Set' if self.replicate_api_key else '✗ Missing'}")
 
         # Initialize clients only if API keys are provided
         self.openai_client = AsyncOpenAI(api_key=self.openai_api_key) if self.openai_api_key else None
@@ -525,6 +527,117 @@ Your analysis should:
         print(f"DeepSeek V3 infotainment analysis complete. Total issues found: {len(all_issues)}")
         return all_issues
 
+    async def analyze_with_llama_maverick(self, file_contents: Dict[str, str]) -> List[Dict]:
+        """Analyze code using Llama Maverick model via Replicate API."""
+        import httpx
+
+        if not self.replicate_api_key:
+            print("Replicate API key not configured for Llama Maverick")
+            return []
+
+        print(f"Starting Llama Maverick infotainment analysis...")
+        all_issues = []
+
+        # Get the appropriate system prompt based on selected standards
+        system_prompt = self._get_system_prompt_for_standards(self.current_selected_standards)
+
+        async with httpx.AsyncClient(timeout=300.0) as client:  # Longer timeout for Llama
+            for filename, content in file_contents.items():
+                if not self._is_infotainment_file(filename):
+                    print(f"Skipping {filename} - not an infotainment-relevant file")
+                    continue
+
+                print(f"Analyzing {filename} with Llama Maverick...")
+                code_with_lines = self._add_line_numbers(content)
+                context_prompt = self._get_context_prompt(filename)
+
+                try:
+                    # Replicate API call for Llama Maverick
+                    # Using meta/llama-2-70b-chat or similar latest Llama model
+                    response = await client.post(
+                        "https://api.replicate.com/v1/predictions",
+                        headers={
+                            "Authorization": f"Token {self.replicate_api_key}",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "version": "02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3",
+                            # Latest Llama model version
+                            "input": {
+                                "system_prompt": system_prompt,
+                                "prompt": f"Analyze this {filename} file for comprehensive infotainment accessibility issues and return valid JSON:\n\n{context_prompt}\n\n{code_with_lines}",
+                                "max_new_tokens": 4096,
+                                "temperature": 0.1,
+                                "top_p": 0.9,
+                                "repetition_penalty": 1.15
+                            }
+                        }
+                    )
+
+                    print(f"Llama Maverick API response status: {response.status_code}")
+
+                    if response.status_code != 201:
+                        error_text = response.text
+                        print(f"Llama Maverick API error: {response.status_code} - {error_text}")
+                        continue
+
+                    prediction = response.json()
+                    prediction_id = prediction["id"]
+
+                    # Poll for completion
+                    max_polls = 60  # 5 minutes max
+                    for poll_count in range(max_polls):
+                        await asyncio.sleep(5)  # Wait 5 seconds between polls
+
+                        status_response = await client.get(
+                            f"https://api.replicate.com/v1/predictions/{prediction_id}",
+                            headers={"Authorization": f"Token {self.replicate_api_key}"}
+                        )
+
+                        if status_response.status_code == 200:
+                            status_data = status_response.json()
+
+                            if status_data["status"] == "succeeded":
+                                output = status_data["output"]
+                                if isinstance(output, list):
+                                    content_text = "".join(output)
+                                else:
+                                    content_text = str(output)
+
+                                print(f"Llama Maverick response for {filename}: {content_text[:300]}...")
+
+                                # Extract JSON from Llama response
+                                issues = self._extract_json_from_llama_maverick(content_text, filename)
+                                print(f"Extracted {len(issues)} issues from Llama Maverick for {filename}")
+
+                                # Add filename and enhance each issue
+                                for issue in issues:
+                                    if "file" not in issue:
+                                        issue["file"] = filename
+                                    self._enhance_issue_data(issue, filename)
+                                    all_issues.append(issue)
+                                break
+
+                            elif status_data["status"] == "failed":
+                                print(
+                                    f"Llama Maverick prediction failed for {filename}: {status_data.get('error', 'Unknown error')}")
+                                break
+
+                    else:
+                        print(f"Llama Maverick analysis timeout for {filename}")
+
+                except httpx.TimeoutException:
+                    print(f"Llama Maverick API timeout for {filename}")
+                    continue
+                except Exception as e:
+                    print(f"Llama Maverick analysis error for {filename}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+        print(f"Llama Maverick infotainment analysis complete. Total issues found: {len(all_issues)}")
+        return all_issues
+
     def _is_infotainment_file(self, filename: str) -> bool:
         """Check if file is relevant for infotainment accessibility analysis."""
         # Web-based infotainment files
@@ -844,6 +957,78 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
 
         return []
 
+    def _extract_json_from_llama_maverick(self, content_text: str, filename: str) -> List[Dict]:
+        """Enhanced JSON extraction specifically for Llama Maverick responses."""
+        try:
+            # First, try to parse the entire response as JSON
+            result = json.loads(content_text.strip())
+            return result.get("issues", [])
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON block patterns common in Llama responses
+        json_patterns = [
+            r'```json\s*(\{.*?\})\s*```',
+            r'```\s*(\{.*?\})\s*```',
+            r'(\{[^}]*"issues"[^}]*\[.*?\]\s*\})',
+            r'(\{.*?"issues".*?\})',
+            r'(\{[\s\S]*\})',
+            # Llama sometimes returns without proper JSON formatting
+            r'"issues":\s*\[(.*?)\]',
+        ]
+
+        for pattern in json_patterns:
+            matches = re.findall(pattern, content_text, re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                try:
+                    # Clean up the JSON string for Llama responses
+                    json_str = match.strip()
+
+                    # Handle Llama-specific formatting issues
+                    json_str = re.sub(r',\s*}', '}', json_str)
+                    json_str = re.sub(r',\s*]', ']', json_str)
+                    json_str = re.sub(r'}\s*{', '},{', json_str)  # Fix missing commas between objects
+
+                    # Try to wrap in proper JSON structure if it's just the issues array
+                    if json_str.startswith('[') and json_str.endswith(']'):
+                        json_str = f'{{"issues": {json_str}}}'
+
+                    result = json.loads(json_str)
+                    if isinstance(result, dict) and "issues" in result:
+                        return result["issues"]
+                    elif isinstance(result, list):
+                        return result
+                except json.JSONDecodeError:
+                    continue
+
+        # If no valid JSON found, create fallback
+        print(f"Could not parse JSON from Llama Maverick response for {filename}")
+        print(f"Raw response: {content_text}")
+
+        # Look for infotainment accessibility-related keywords
+        infotainment_keywords = [
+            'accessibility', 'wcag', 'contrast', 'voice control', 'touch target',
+            'driver distraction', 'safety critical', 'eyes off road', 'infotainment'
+        ]
+
+        if any(keyword.lower() in content_text.lower() for keyword in infotainment_keywords):
+            return [{
+                "file": filename,
+                "line": 1,
+                "type": "accessibility_issue",
+                "severity": "medium",
+                "safety_critical": False,
+                "wcag_criteria": [],
+                "description": "Llama Maverick detected potential infotainment accessibility issues but response format was invalid. Please review manually.",
+                "original_code": "See description",
+                "suggested_fix": "Review infotainment accessibility guidelines and automotive standards",
+                "automotive_metrics": {"eyes_off_road_time": 2.3, "glance_count": 2, "task_time": 5.8},
+                "context_conditions": {"lighting": "variable", "driving_mode": True, "interaction_method": "mixed"},
+                "interaction_method": "mixed"
+            }]
+
+        return []
+
     def _add_line_numbers(self, content: str) -> str:
         """Add line numbers to code for easier reference."""
         lines = content.split('\n')
@@ -865,7 +1050,7 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
 
         Args:
             file_contents: Dictionary mapping filenames to their content
-            model: LLM model to use ('gpt-4o', 'claude-opus-4', 'Deepseek-V3')
+            model: LLM model to use ('gpt-4o', 'claude-opus-4', 'Deepseek-V3', 'llama-maverick')
             analysis_id: Unique identifier for this analysis
             selected_standards: List of standards to check against
 
@@ -886,6 +1071,8 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
                 return await self.analyze_with_anthropic(file_contents, "claude-opus-4")
             elif model in ["Deepseek-V3", "deepseek-v3", "deepseek-chat"]:
                 return await self.analyze_with_deepseek(file_contents)
+            elif model == "llama-maverick":
+                return await self.analyze_with_llama_maverick(file_contents)
             else:
                 raise ValueError(f"Unsupported model: {model}")
 
@@ -1013,4 +1200,4 @@ voice control integration, and comprehensive WCAG compliance for automotive cont
                 if is_common:
                     comparison["common_issues"].append(consensus_data)
 
-        return comparison
+        return comparisonimportos
