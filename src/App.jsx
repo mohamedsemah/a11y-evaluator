@@ -56,11 +56,145 @@ import {
   Code,
   Spinner,
   CircularProgress,
-  CircularProgressLabel
+  CircularProgressLabel,
+  Skeleton,
+  SkeletonText
 } from '@chakra-ui/react';
 import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon, InfoIcon } from '@chakra-ui/icons';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+// Default/fallback data to show immediately while loading
+const DEFAULT_MODELS = [
+  {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    provider: "OpenAI",
+    description: "Advanced reasoning and code analysis",
+    capabilities: ["Code review", "WCAG compliance", "Automotive safety analysis"]
+  },
+  {
+    id: "claude-opus-4",
+    name: "Claude Opus 4",
+    provider: "Anthropic",
+    description: "Balanced performance for accessibility analysis",
+    capabilities: ["Accessibility review", "Standards compliance", "Detailed explanations"]
+  },
+  {
+    id: "Deepseek-V3",
+    name: "DeepSeek V3",
+    provider: "DeepSeek",
+    description: "Specialized code analysis and debugging",
+    capabilities: ["Code optimization", "Bug detection", "Performance analysis"]
+  },
+  {
+    id: "llama-maverick",
+    name: "Llama Maverick",
+    provider: "Meta/Replicate",
+    description: "Latest Llama model with enhanced automotive domain knowledge",
+    capabilities: ["Automotive UI analysis", "Safety-critical code review", "Multi-modal understanding"]
+  }
+];
+
+const DEFAULT_STANDARDS = [
+  {
+    id: "WCAG 2.2",
+    name: "Web Content Accessibility Guidelines 2.2",
+    description: "International standard for web accessibility",
+    category: "Web Standards",
+    applicable_to: ["HTML", "CSS", "JavaScript", "Web-based HMI"]
+  },
+  {
+    id: "ISO15008",
+    name: "ISO 15008:2017",
+    description: "Road vehicles — Ergonomic aspects of transport information and control systems",
+    category: "Automotive Standards",
+    applicable_to: ["All infotainment interfaces"]
+  },
+  {
+    id: "NHTSA",
+    name: "NHTSA Driver Distraction Guidelines",
+    description: "US safety guidelines for in-vehicle electronic devices",
+    category: "Safety Standards",
+    applicable_to: ["All driver-accessible interfaces"]
+  },
+  {
+    id: "SAE J3016",
+    name: "SAE J3016 Levels of Driving Automation",
+    description: "Standard for automotive automation levels",
+    category: "Automation Standards",
+    applicable_to: ["Automated driving systems"]
+  },
+  {
+    id: "GTR8",
+    name: "Global Technical Regulation No. 8",
+    description: "UN regulation for Electronic Stability Control systems",
+    category: "International Standards",
+    applicable_to: ["Safety-critical automotive systems"]
+  }
+];
+
+// Loading skeleton component
+const LoadingSkeleton = ({ type = 'card', lines = 3 }) => {
+  if (type === 'card') {
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton height="20px" width="60%" />
+        </CardHeader>
+        <CardBody>
+          <VStack spacing={3} align="stretch">
+            {Array.from({ length: lines }, (_, i) => (
+              <Skeleton key={i} height="15px" width={i === lines - 1 ? "80%" : "100%"} />
+            ))}
+          </VStack>
+        </CardBody>
+      </Card>
+    );
+  }
+
+  if (type === 'checkbox') {
+    return (
+      <HStack spacing={3}>
+        <Skeleton height="16px" width="16px" />
+        <VStack align="start" spacing={1} flex="1">
+          <Skeleton height="16px" width="60%" />
+          <Skeleton height="12px" width="80%" />
+        </VStack>
+      </HStack>
+    );
+  }
+
+  return <Skeleton height="20px" />;
+};
+
+// Connection status indicator
+const ConnectionStatus = ({ isLoading, hasError }) => {
+  if (isLoading) {
+    return (
+      <HStack spacing={2}>
+        <Spinner size="xs" />
+        <Text fontSize="xs" color="gray.500">Loading...</Text>
+      </HStack>
+    );
+  }
+
+  if (hasError) {
+    return (
+      <HStack spacing={2}>
+        <Box w="6px" h="6px" bg="orange.400" borderRadius="full" />
+        <Text fontSize="xs" color="orange.500">Using cached data</Text>
+      </HStack>
+    );
+  }
+
+  return (
+    <HStack spacing={2}>
+      <Box w="6px" h="6px" bg="green.400" borderRadius="full" />
+      <Text fontSize="xs" color="green.500">Connected</Text>
+    </HStack>
+  );
+};
 
 function App() {
   // Authentication state
@@ -88,9 +222,13 @@ function App() {
   const [appliedFixes, setAppliedFixes] = useState(new Set());
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Available options
-  const [availableModels, setAvailableModels] = useState([]);
-  const [availableStandards, setAvailableStandards] = useState([]);
+  // Available options with loading states
+  const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
+  const [availableStandards, setAvailableStandards] = useState(DEFAULT_STANDARDS);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [standardsLoading, setStandardsLoading] = useState(true);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
 
   // Upload progress state
   const [uploadProgress, setUploadProgress] = useState(null);
@@ -98,11 +236,12 @@ function App() {
 
   const toast = useToast();
 
-  // Token validation on startup
+  // Initial data loading with better error handling
   useEffect(() => {
-    const validateToken = async () => {
+    const initializeApp = async () => {
       if (token) {
         try {
+          // First validate token with a quick request
           const response = await fetch(`${API_URL}/analyses`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
@@ -115,23 +254,67 @@ function App() {
               status: 'info',
               duration: 5000
             });
-          } else if (response.ok) {
-            fetchAvailableModels();
-            fetchAvailableStandards();
-            fetchAnalyses();
+            return;
+          }
+
+          if (response.ok) {
+            // Load all data in parallel with timeout
+            const loadDataWithTimeout = (promise, timeout = 10000) => {
+              return Promise.race([
+                promise,
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('Request timeout')), timeout)
+                )
+              ]);
+            };
+
+            const results = await Promise.allSettled([
+              loadDataWithTimeout(fetchAvailableModels()),
+              loadDataWithTimeout(fetchAvailableStandards()),
+              loadDataWithTimeout(fetchAnalyses())
+            ]);
+
+            // Check if any critical requests failed
+            const hasFailures = results.some(result => result.status === 'rejected');
+            if (hasFailures) {
+              setConnectionError(true);
+              toast({
+                title: 'Connection issues detected',
+                description: 'Using cached data. Some features may be limited.',
+                status: 'warning',
+                duration: 8000,
+                isClosable: true
+              });
+            }
+
+            setDataLoaded(true);
           }
         } catch (error) {
-          console.error('Token validation error:', error);
+          console.error('App initialization error:', error);
+          setConnectionError(true);
           toast({
-            title: 'Connection error - please check your internet connection',
-            status: 'error',
-            duration: 5000
+            title: 'Connection error',
+            description: 'Using cached data. Please check your internet connection.',
+            status: 'warning',
+            duration: 8000,
+            isClosable: true
           });
+          // Keep using default data
+          setModelsLoading(false);
+          setStandardsLoading(false);
+          setDataLoaded(true);
         }
+      } else {
+        // No token, stop loading states immediately
+        setModelsLoading(false);
+        setStandardsLoading(false);
+        setDataLoaded(true);
       }
     };
 
-    validateToken();
+    // Small delay to prevent flash, then initialize
+    const timer = setTimeout(initializeApp, 500);
+    return () => clearTimeout(timer);
   }, [token]);
 
   // Logout with cleanup
@@ -150,9 +333,13 @@ function App() {
     setHasUnsavedChanges(false);
     setUploadProgress(null);
     setFilteringStats(null);
+    setDataLoaded(true);
+    setModelsLoading(false);
+    setStandardsLoading(false);
+    setConnectionError(false);
   };
 
-  // Authentication functions
+  // Enhanced authentication functions
   const handleAuth = async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
@@ -181,12 +368,20 @@ function App() {
         setUser({ id: data.user_id, email });
         onLoginClose();
 
+        // Reset loading states for fresh data fetch
+        setModelsLoading(true);
+        setStandardsLoading(true);
+        setDataLoaded(false);
+        setConnectionError(false);
+
         try {
-          await Promise.all([
+          await Promise.allSettled([
             fetchAvailableModels(),
             fetchAvailableStandards(),
             fetchAnalyses()
           ]);
+
+          setDataLoaded(true);
 
           toast({
             title: isRegistering ? 'Registration successful!' : 'Login successful!',
@@ -194,10 +389,13 @@ function App() {
           });
         } catch (verifyError) {
           console.error('Post-auth data fetch failed:', verifyError);
+          setConnectionError(true);
           toast({
-            title: 'Login successful, but failed to load data - please refresh',
+            title: 'Login successful, but connection issues detected',
+            description: 'Using cached data - some features may be limited',
             status: 'warning'
           });
+          setDataLoaded(true);
         }
       } else {
         if (data.detail?.includes('User not found')) {
@@ -229,28 +427,48 @@ function App() {
     }
   };
 
-  // Data fetching functions
+  // Enhanced data fetching functions with better error handling
   const fetchAvailableModels = async () => {
     try {
+      setModelsLoading(true);
       const response = await fetch(`${API_URL}/models`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableModels(data.models || []);
+        setAvailableModels(data.models || DEFAULT_MODELS);
+        setConnectionError(false);
+      } else {
+        console.warn('Failed to fetch models, using defaults');
+        setAvailableModels(DEFAULT_MODELS);
+        setConnectionError(true);
       }
     } catch (error) {
       console.error('Error fetching models:', error);
+      setAvailableModels(DEFAULT_MODELS);
+      setConnectionError(true);
+    } finally {
+      setModelsLoading(false);
     }
   };
 
   const fetchAvailableStandards = async () => {
     try {
+      setStandardsLoading(true);
       const response = await fetch(`${API_URL}/standards`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableStandards(data.standards || []);
+        setAvailableStandards(data.standards || DEFAULT_STANDARDS);
+        setConnectionError(false);
+      } else {
+        console.warn('Failed to fetch standards, using defaults');
+        setAvailableStandards(DEFAULT_STANDARDS);
+        setConnectionError(true);
       }
     } catch (error) {
       console.error('Error fetching standards:', error);
+      setAvailableStandards(DEFAULT_STANDARDS);
+      setConnectionError(true);
+    } finally {
+      setStandardsLoading(false);
     }
   };
 
@@ -776,6 +994,7 @@ function App() {
             </Heading>
             <Spacer />
             <HStack spacing={4}>
+              <ConnectionStatus isLoading={!dataLoaded} hasError={connectionError} />
               {hasUnsavedChanges && (
                 <Badge colorScheme="orange" variant="solid">
                   {appliedFixes.size} fixes applied
@@ -804,6 +1023,19 @@ function App() {
               {/* Upload & Analyze Tab */}
               <TabPanel>
                 <VStack spacing={6} align="stretch">
+                  {/* Connection Status Alert */}
+                  {connectionError && (
+                    <Alert status="warning" borderRadius="md">
+                      <AlertIcon />
+                      <VStack align="start" spacing={1} flex="1">
+                        <Text fontWeight="bold">Connection Issue Detected</Text>
+                        <Text fontSize="sm">
+                          Using cached AI models and standards. Some features may be limited until connection is restored.
+                        </Text>
+                      </VStack>
+                    </Alert>
+                  )}
+
                   {/* File Upload */}
                   <Card>
                     <CardHeader>
@@ -896,23 +1128,38 @@ function App() {
                         <Heading size="sm">Select AI Models</Heading>
                       </CardHeader>
                       <CardBody>
-                        <CheckboxGroup
-                          value={selectedModels}
-                          onChange={setSelectedModels}
-                        >
-                          <Stack>
-                            {availableModels.map(model => (
-                              <Checkbox key={model.id} value={model.id}>
-                                <VStack align="start" spacing={1}>
-                                  <Text fontWeight="bold">{model.name}</Text>
-                                  <Text fontSize="sm" color="gray.600">
-                                    {model.description}
-                                  </Text>
-                                </VStack>
-                              </Checkbox>
-                            ))}
-                          </Stack>
-                        </CheckboxGroup>
+                        {modelsLoading ? (
+                          <VStack spacing={3}>
+                            <HStack>
+                              <Spinner size="sm" />
+                              <Text fontSize="sm" color="gray.500">Loading AI models...</Text>
+                            </HStack>
+                            <Stack spacing={3} width="full">
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                            </Stack>
+                          </VStack>
+                        ) : (
+                          <CheckboxGroup
+                            value={selectedModels}
+                            onChange={setSelectedModels}
+                          >
+                            <Stack>
+                              {availableModels.map(model => (
+                                <Checkbox key={model.id} value={model.id}>
+                                  <VStack align="start" spacing={1}>
+                                    <Text fontWeight="bold">{model.name}</Text>
+                                    <Text fontSize="sm" color="gray.600">
+                                      {model.description}
+                                    </Text>
+                                  </VStack>
+                                </Checkbox>
+                              ))}
+                            </Stack>
+                          </CheckboxGroup>
+                        )}
                       </CardBody>
                     </Card>
 
@@ -922,23 +1169,39 @@ function App() {
                         <Heading size="sm">Accessibility Standards</Heading>
                       </CardHeader>
                       <CardBody>
-                        <CheckboxGroup
-                          value={selectedStandards}
-                          onChange={setSelectedStandards}
-                        >
-                          <Stack>
-                            {availableStandards.map(standard => (
-                              <Checkbox key={standard.id} value={standard.id}>
-                                <VStack align="start" spacing={1}>
-                                  <Text fontWeight="bold">{standard.name}</Text>
-                                  <Text fontSize="sm" color="gray.600">
-                                    {standard.description}
-                                  </Text>
-                                </VStack>
-                              </Checkbox>
-                            ))}
-                          </Stack>
-                        </CheckboxGroup>
+                        {standardsLoading ? (
+                          <VStack spacing={3}>
+                            <HStack>
+                              <Spinner size="sm" />
+                              <Text fontSize="sm" color="gray.500">Loading standards...</Text>
+                            </HStack>
+                            <Stack spacing={3} width="full">
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                              <LoadingSkeleton type="checkbox" />
+                            </Stack>
+                          </VStack>
+                        ) : (
+                          <CheckboxGroup
+                            value={selectedStandards}
+                            onChange={setSelectedStandards}
+                          >
+                            <Stack>
+                              {availableStandards.map(standard => (
+                                <Checkbox key={standard.id} value={standard.id}>
+                                  <VStack align="start" spacing={1}>
+                                    <Text fontWeight="bold">{standard.name}</Text>
+                                    <Text fontSize="sm" color="gray.600">
+                                      {standard.description}
+                                    </Text>
+                                  </VStack>
+                                </Checkbox>
+                              ))}
+                            </Stack>
+                          </CheckboxGroup>
+                        )}
                       </CardBody>
                     </Card>
                   </SimpleGrid>
@@ -950,7 +1213,7 @@ function App() {
                     onClick={startAnalysis}
                     isLoading={loading}
                     loadingText="Analyzing..."
-                    isDisabled={!currentAnalysis || selectedModels.length === 0}
+                    isDisabled={!currentAnalysis || selectedModels.length === 0 || !dataLoaded}
                   >
                     Start Accessibility Analysis
                   </Button>
