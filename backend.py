@@ -59,6 +59,178 @@ llm_analyzer = InfotainmentLLMAnalyzer()
 # Security
 security = HTTPBearer()
 
+# File filtering configuration
+EXCLUDED_DIRECTORIES = {
+    'node_modules', '.git', '.svn', '.hg', '__pycache__', '.pytest_cache',
+    'build', 'dist', 'out', '.next', '.nuxt', 'target', 'bin', 'obj',
+    'coverage', '.nyc_output', 'logs', 'log', 'tmp', 'temp', '.cache',
+    '.vscode', '.idea', '.vs', 'bower_components', 'vendor', 'packages',
+    '.sass-cache', '.gradle', '.m2', 'Pods', 'DerivedData'
+}
+
+EXCLUDED_FILES = {
+    '.DS_Store', 'Thumbs.db', '.gitignore', '.gitkeep', '.npmignore',
+    'package-lock.json', 'yarn.lock', 'composer.lock', 'Gemfile.lock',
+    '.env', '.env.local', '.env.development', '.env.production'
+}
+
+EXCLUDED_EXTENSIONS = {
+    # Binary files
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.obj', '.o', '.a', '.lib',
+    # Images (unless they have accessibility concerns)
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.tiff', '.webp',
+    # Videos and audio
+    '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mp3', '.wav', '.ogg', '.flac',
+    # Archives
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2',
+    # Documents
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    # Fonts
+    '.ttf', '.otf', '.woff', '.woff2', '.eot',
+    # Compiled/minified files
+    '.min.js', '.min.css', '.map',
+    # Lock/log files
+    '.lock', '.log', '.pid', '.tmp'
+}
+
+RELEVANT_EXTENSIONS = {
+    # Web files
+    '.html', '.htm', '.css', '.js', '.jsx', '.ts', '.tsx', '.vue', '.svelte',
+    # React/JSX files
+    '.mjs', '.cjs',
+    # Automotive/embedded files
+    '.qml', '.ui', '.xml', '.xaml',
+    # Native mobile
+    '.swift', '.kt', '.java', '.dart',
+    # Configuration files that might affect accessibility
+    '.json', '.yaml', '.yml', '.toml', '.ini', '.conf',
+    # Style files
+    '.scss', '.sass', '.less', '.styl',
+    # Template files
+    '.hbs', '.mustache', '.ejs', '.pug', '.jade',
+    # Documentation that might contain accessibility info
+    '.md', '.mdx', '.txt'
+}
+
+MAX_FILE_SIZE = 1024 * 1024  # 1MB per file
+MAX_TOTAL_FILES = 1000  # Maximum files to process
+
+
+def _should_exclude_path(path: str) -> bool:
+    """Check if a file path should be excluded from analysis."""
+    path_parts = path.split('/')
+
+    # Check for excluded directories at any level
+    for part in path_parts:
+        if part.lower() in EXCLUDED_DIRECTORIES:
+            return True
+
+    # Check for excluded file names
+    filename = os.path.basename(path)
+    if filename in EXCLUDED_FILES:
+        return True
+
+    # Check for excluded extensions
+    for ext in EXCLUDED_EXTENSIONS:
+        if path.lower().endswith(ext):
+            return True
+
+    # Check if file is too large (might be a build artifact)
+    return False
+
+
+def _is_relevant_for_analysis(path: str, content_size: int) -> bool:
+    """Check if a file is relevant for infotainment accessibility analysis."""
+
+    # Skip if excluded
+    if _should_exclude_path(path):
+        return False
+
+    # Skip if too large
+    if content_size > MAX_FILE_SIZE:
+        print(f"Skipping {path} - too large ({content_size} bytes)")
+        return False
+
+    filename = os.path.basename(path).lower()
+
+    # Check for relevant extensions
+    has_relevant_extension = any(path.lower().endswith(ext) for ext in RELEVANT_EXTENSIONS)
+
+    # Check for infotainment-specific keywords in path/filename
+    infotainment_keywords = [
+        'hmi', 'dashboard', 'cluster', 'infotainment', 'vehicle', 'automotive',
+        'carplay', 'androidauto', 'navigation', 'media', 'climate', 'settings',
+        'radio', 'music', 'phone', 'contacts', 'maps', 'traffic', 'voice',
+        'component', 'widget', 'screen', 'page', 'view', 'dialog', 'modal'
+    ]
+
+    has_relevant_keywords = any(keyword in path.lower() for keyword in infotainment_keywords)
+
+    # Include if has relevant extension OR contains infotainment keywords
+    return has_relevant_extension or has_relevant_keywords
+
+
+def _analyze_zip_structure(zip_file_path: str) -> Dict:
+    """Analyze ZIP structure and provide filtering recommendations."""
+    structure = {
+        'total_files': 0,
+        'excluded_files': 0,
+        'relevant_files': 0,
+        'large_files': 0,
+        'directories_found': set(),
+        'extensions_found': set(),
+        'sample_relevant_files': [],
+        'excluded_reasons': {}
+    }
+
+    try:
+        with zipfile.ZipFile(zip_file_path, 'r') as zf:
+            for file_info in zf.filelist:
+                if file_info.is_dir():
+                    continue
+
+                structure['total_files'] += 1
+
+                # Analyze directory structure
+                path_parts = file_info.filename.split('/')
+                for part in path_parts[:-1]:  # Exclude filename
+                    if part:
+                        structure['directories_found'].add(part)
+
+                # Analyze extensions
+                if '.' in file_info.filename:
+                    ext = '.' + file_info.filename.split('.')[-1].lower()
+                    structure['extensions_found'].add(ext)
+
+                # Check if file should be included
+                if _should_exclude_path(file_info.filename):
+                    structure['excluded_files'] += 1
+                    # Track exclusion reasons
+                    reason = 'unknown'
+                    if any(dir_name in file_info.filename.lower() for dir_name in EXCLUDED_DIRECTORIES):
+                        reason = 'excluded_directory'
+                    elif any(file_info.filename.lower().endswith(ext) for ext in EXCLUDED_EXTENSIONS):
+                        reason = 'excluded_extension'
+                    elif os.path.basename(file_info.filename) in EXCLUDED_FILES:
+                        reason = 'excluded_filename'
+
+                    structure['excluded_reasons'][reason] = structure['excluded_reasons'].get(reason, 0) + 1
+
+                elif file_info.file_size > MAX_FILE_SIZE:
+                    structure['large_files'] += 1
+                elif _is_relevant_for_analysis(file_info.filename, file_info.file_size):
+                    structure['relevant_files'] += 1
+                    if len(structure['sample_relevant_files']) < 20:
+                        structure['sample_relevant_files'].append({
+                            'path': file_info.filename,
+                            'size': file_info.file_size
+                        })
+
+    except Exception as e:
+        print(f"Error analyzing ZIP structure: {e}")
+
+    return structure
+
 
 # Enhanced Authentication helpers
 def create_access_token(data: dict):
@@ -280,11 +452,11 @@ async def login(payload: AuthRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Login failed")
 
 
-# Enhanced file upload with user validation
+# Enhanced file upload with intelligent filtering
 @app.post("/api/upload")
 async def upload_files(
         files: List[UploadFile] = File(...),
-        user_id: str = Depends(get_current_user_with_validation),  # Enhanced validation
+        user_id: str = Depends(get_current_user_with_validation),
         db: Session = Depends(get_db)
 ):
     analysis_id = str(uuid.uuid4())
@@ -293,32 +465,102 @@ async def upload_files(
     try:
         file_contents = {}
         infotainment_file_count = 0
+        total_files_processed = 0
+        skipped_files = 0
+        filtering_stats = {
+            'excluded_directories': 0,
+            'excluded_extensions': 0,
+            'too_large': 0,
+            'not_relevant': 0
+        }
 
         for file in files:
-            if file.size > 50 * 1024 * 1024:  # 50MB limit
+            if file.size > 50 * 1024 * 1024:  # 50MB limit for individual files
                 raise HTTPException(status_code=400, detail=f"File {file.filename} exceeds 50MB limit")
 
             content = await file.read()
 
-            # Handle ZIP files
+            # Handle ZIP files with intelligent filtering
             if file.filename.endswith('.zip'):
-                with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                    for name in zf.namelist():
-                        if not name.endswith('/'):
-                            try:
-                                file_content = zf.read(name).decode('utf-8', errors='ignore')
-                                file_contents[name] = file_content
-                                if _is_infotainment_relevant(name):
+                print(f"Processing ZIP file: {file.filename}")
+
+                # Save ZIP temporarily for analysis
+                zip_path = os.path.join(temp_dir, file.filename)
+                with open(zip_path, 'wb') as f:
+                    f.write(content)
+
+                # Analyze ZIP structure first
+                structure = _analyze_zip_structure(zip_path)
+                print(
+                    f"ZIP Analysis - Total files: {structure['total_files']}, Relevant: {structure['relevant_files']}, Excluded: {structure['excluded_files']}")
+
+                # Warn if too many files
+                if structure['total_files'] > MAX_TOTAL_FILES:
+                    print(f"WARNING: ZIP contains {structure['total_files']} files. Processing only relevant ones.")
+
+                with zipfile.ZipFile(zip_path) as zf:
+                    processed_count = 0
+                    for file_info in zf.filelist:
+                        if file_info.is_dir():
+                            continue
+
+                        total_files_processed += 1
+
+                        # Apply intelligent filtering
+                        if _should_exclude_path(file_info.filename):
+                            skipped_files += 1
+                            # Track exclusion reason
+                            if any(dir_name in file_info.filename.lower() for dir_name in EXCLUDED_DIRECTORIES):
+                                filtering_stats['excluded_directories'] += 1
+                            elif any(file_info.filename.lower().endswith(ext) for ext in EXCLUDED_EXTENSIONS):
+                                filtering_stats['excluded_extensions'] += 1
+                            continue
+
+                        if file_info.file_size > MAX_FILE_SIZE:
+                            skipped_files += 1
+                            filtering_stats['too_large'] += 1
+                            continue
+
+                        if not _is_relevant_for_analysis(file_info.filename, file_info.file_size):
+                            skipped_files += 1
+                            filtering_stats['not_relevant'] += 1
+                            continue
+
+                        # Limit total files processed
+                        if processed_count >= MAX_TOTAL_FILES:
+                            print(f"Reached maximum file limit ({MAX_TOTAL_FILES}). Stopping processing.")
+                            break
+
+                        try:
+                            file_content = zf.read(file_info.filename).decode('utf-8', errors='ignore')
+                            if len(file_content.strip()) > 0:  # Skip empty files
+                                file_contents[file_info.filename] = file_content
+                                processed_count += 1
+                                if _is_infotainment_relevant(file_info.filename):
                                     infotainment_file_count += 1
-                            except Exception as e:
-                                print(f"Error reading {name} from ZIP: {e}")
-                                continue
+                        except Exception as e:
+                            print(f"Error reading {file_info.filename} from ZIP: {e}")
+                            continue
+
+                print(f"ZIP Processing Complete - Processed: {processed_count}, Skipped: {skipped_files}")
+
             else:
+                # Handle individual files
                 try:
+                    if _should_exclude_path(file.filename):
+                        skipped_files += 1
+                        continue
+
+                    if not _is_relevant_for_analysis(file.filename, len(content)):
+                        skipped_files += 1
+                        continue
+
                     file_content = content.decode('utf-8', errors='ignore')
-                    file_contents[file.filename] = file_content
-                    if _is_infotainment_relevant(file.filename):
-                        infotainment_file_count += 1
+                    if len(file_content.strip()) > 0:
+                        file_contents[file.filename] = file_content
+                        total_files_processed += 1
+                        if _is_infotainment_relevant(file.filename):
+                            infotainment_file_count += 1
                 except Exception as e:
                     print(f"Error reading {file.filename}: {e}")
                     continue
@@ -326,7 +568,7 @@ async def upload_files(
         if infotainment_file_count == 0:
             raise HTTPException(
                 status_code=400,
-                detail="No infotainment-relevant files found. Please upload HTML, JS, CSS, QML, or other UI files."
+                detail=f"No infotainment-relevant files found. Processed {len(file_contents)} files, skipped {skipped_files}. Please upload HTML, JS, CSS, QML, or other UI files."
             )
 
         # Create analysis record with validated user_id
@@ -343,7 +585,10 @@ async def upload_files(
             "files": list(file_contents.keys()),
             "total_files": len(file_contents),
             "infotainment_files": infotainment_file_count,
-            "context_type": "infotainment"
+            "skipped_files": skipped_files,
+            "filtering_stats": filtering_stats,
+            "context_type": "infotainment",
+            "message": f"Successfully processed {len(file_contents)} relevant files out of {total_files_processed + skipped_files} total files"
         }
 
     except HTTPException:
@@ -352,7 +597,7 @@ async def upload_files(
         print(f"Upload error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
     finally:
-        shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def _is_infotainment_relevant(filename: str) -> bool:
@@ -412,7 +657,8 @@ async def analyze_code(
         "analysis_id": analysis_id,
         "context": "infotainment",
         "standards": payload.standards,
-        "models": payload.llm_models
+        "models": payload.llm_models,
+        "files_to_analyze": len(analysis.file_contents)
     }
 
 
@@ -423,6 +669,8 @@ async def run_infotainment_analysis(analysis_id: str, llm_models: List[str], sta
     try:
         all_issues = {}
         analysis_sessions = {}
+
+        print(f"Starting infotainment analysis for {len(analysis.file_contents)} files with models: {llm_models}")
 
         for model in llm_models:
             try:

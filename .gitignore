@@ -41,3 +41,5 @@ htmlcov/
 
 package.json
 package-lock.json
+
+sample/

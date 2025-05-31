@@ -53,9 +53,12 @@ import {
   TagLabel,
   Wrap,
   WrapItem,
-  Code
+  Code,
+  Spinner,
+  CircularProgress,
+  CircularProgressLabel
 } from '@chakra-ui/react';
-import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon } from '@chakra-ui/icons';
+import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon, InfoIcon } from '@chakra-ui/icons';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -88,6 +91,10 @@ function App() {
   // Available options
   const [availableModels, setAvailableModels] = useState([]);
   const [availableStandards, setAvailableStandards] = useState([]);
+
+  // Upload progress state
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [filteringStats, setFilteringStats] = useState(null);
 
   const toast = useToast();
 
@@ -141,6 +148,8 @@ function App() {
     setSelectedModels([]);
     setAppliedFixes(new Set());
     setHasUnsavedChanges(false);
+    setUploadProgress(null);
+    setFilteringStats(null);
   };
 
   // Authentication functions
@@ -267,12 +276,25 @@ function App() {
     }
   };
 
-  // File upload
+  // Enhanced file upload with progress tracking
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files);
     setFiles(files);
 
     if (files.length === 0) return;
+
+    // Calculate total size and show preliminary info
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    const isLargeUpload = totalSize > 10 * 1024 * 1024; // 10MB+
+
+    if (isLargeUpload) {
+      setUploadProgress({
+        stage: 'preparing',
+        message: 'Preparing large file upload...',
+        totalFiles: files.length,
+        totalSizeMB: (totalSize / (1024 * 1024)).toFixed(1)
+      });
+    }
 
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
@@ -280,6 +302,14 @@ function App() {
     try {
       setLoading(true);
       setAnalysisStatus('uploading');
+
+      if (isLargeUpload) {
+        setUploadProgress(prev => ({
+          ...prev,
+          stage: 'uploading',
+          message: 'Uploading and filtering files...'
+        }));
+      }
 
       const response = await fetch(`${API_URL}/upload`, {
         method: 'POST',
@@ -289,18 +319,38 @@ function App() {
 
       if (response.ok) {
         const data = await response.json();
+
+        // Store filtering statistics
+        setFilteringStats(data.filtering_stats);
+
         toast({
-          title: `Files uploaded successfully!`,
-          description: `${data.infotainment_files} infotainment files detected out of ${data.total_files} total files`,
+          title: `Files processed successfully!`,
+          description: data.message,
           status: 'success',
-          duration: 5000
+          duration: 8000,
+          isClosable: true
         });
+
+        // Show detailed upload results if many files were processed
+        if (data.skipped_files > 0) {
+          setTimeout(() => {
+            toast({
+              title: 'File Filtering Applied',
+              description: `Analyzed ${data.total_files} relevant files, skipped ${data.skipped_files} irrelevant files (node_modules, build files, etc.)`,
+              status: 'info',
+              duration: 10000,
+              isClosable: true
+            });
+          }, 2000);
+        }
 
         setCurrentAnalysis({
           id: data.analysis_id,
           files: data.files,
           infotainment_files: data.infotainment_files,
-          context_type: data.context_type
+          context_type: data.context_type,
+          total_files: data.total_files,
+          skipped_files: data.skipped_files
         });
         setAnalysisStatus('uploaded');
         setAppliedFixes(new Set());
@@ -318,7 +368,9 @@ function App() {
           toast({
             title: 'Upload failed',
             description: errorData.detail || 'Unknown error occurred',
-            status: 'error'
+            status: 'error',
+            duration: 10000,
+            isClosable: true
           });
         }
       }
@@ -332,6 +384,7 @@ function App() {
     } finally {
       setLoading(false);
       setAnalysisStatus('');
+      setUploadProgress(null);
     }
   };
 
@@ -365,9 +418,10 @@ function App() {
         const data = await response.json();
         toast({
           title: 'Analysis started!',
-          description: `Analyzing with ${selectedModels.length} models using ${selectedStandards.length} standards`,
+          description: `Analyzing ${data.files_to_analyze} files with ${selectedModels.length} models using ${selectedStandards.length} standards`,
           status: 'info',
-          duration: 5000
+          duration: 8000,
+          isClosable: true
         });
 
         pollAnalysisStatus(currentAnalysis.id);
@@ -425,8 +479,10 @@ function App() {
 
             toast({
               title: 'Analysis completed!',
-              description: `Found ${data.issues?.length || 0} issues`,
-              status: 'success'
+              description: `Found ${data.issues?.length || 0} accessibility issues`,
+              status: 'success',
+              duration: 5000,
+              isClosable: true
             });
 
             fetchAnalyses();
@@ -636,7 +692,7 @@ function App() {
             <CardBody>
               <VStack spacing={6}>
                 <Text textAlign="center" color="gray.600">
-                  Comprehensive accessibility analysis for automotive infotainment systems
+                  Comprehensive accessibility analysis for automotive infotainment systems with smart file filtering
                 </Text>
 
                 <Button
@@ -763,6 +819,20 @@ function App() {
                           disabled={loading}
                         />
 
+                        {/* Upload Progress */}
+                        {uploadProgress && (
+                          <Alert status="info">
+                            <AlertIcon />
+                            <VStack align="start" spacing={1} flex="1">
+                              <Text fontWeight="bold">{uploadProgress.message}</Text>
+                              <Text fontSize="sm">
+                                Processing {uploadProgress.totalFiles} files ({uploadProgress.totalSizeMB}MB)
+                              </Text>
+                              <Progress size="sm" isIndeterminate width="full" />
+                            </VStack>
+                          </Alert>
+                        )}
+
                         {files.length > 0 && (
                           <Box>
                             <Text fontWeight="bold" mb={2}>Selected Files:</Text>
@@ -781,10 +851,37 @@ function App() {
                         {currentAnalysis && (
                           <Alert status="success">
                             <AlertIcon />
-                            <AlertTitle>Files uploaded!</AlertTitle>
-                            <AlertDescription>
-                              {currentAnalysis.infotainment_files} infotainment files ready for analysis
-                            </AlertDescription>
+                            <VStack align="start" spacing={1}>
+                              <AlertTitle>Files processed successfully!</AlertTitle>
+                              <AlertDescription>
+                                <VStack align="start" spacing={1}>
+                                  <Text>
+                                    {currentAnalysis.infotainment_files} infotainment files ready for analysis
+                                  </Text>
+                                  {currentAnalysis.skipped_files > 0 && (
+                                    <Text fontSize="sm" color="gray.600">
+                                      Skipped {currentAnalysis.skipped_files} irrelevant files (node_modules, build files, etc.)
+                                    </Text>
+                                  )}
+                                </VStack>
+                              </AlertDescription>
+                            </VStack>
+                          </Alert>
+                        )}
+
+                        {/* Filtering Statistics */}
+                        {filteringStats && (
+                          <Alert status="info">
+                            <InfoIcon />
+                            <VStack align="start" spacing={1} flex="1">
+                              <Text fontWeight="bold">Smart File Filtering Applied:</Text>
+                              <SimpleGrid columns={2} spacing={2} fontSize="sm">
+                                <Text>• Excluded directories: {filteringStats.excluded_directories}</Text>
+                                <Text>• Excluded extensions: {filteringStats.excluded_extensions}</Text>
+                                <Text>• Files too large: {filteringStats.too_large}</Text>
+                                <Text>• Not relevant: {filteringStats.not_relevant}</Text>
+                              </SimpleGrid>
+                            </VStack>
                           </Alert>
                         )}
                       </VStack>
@@ -864,9 +961,18 @@ function App() {
                       {analysisStatus === 'analyzing' && (
                         <Box>
                           <Progress isIndeterminate colorScheme="blue" mb={2} />
-                          <Text textAlign="center">
-                            Analyzing {currentAnalysis?.infotainment_files} infotainment files with {selectedModels.length} AI models...
-                          </Text>
+                          <VStack spacing={2}>
+                            <Text textAlign="center">
+                              Analyzing {currentAnalysis?.infotainment_files} infotainment files with {selectedModels.length} AI models...
+                            </Text>
+                            <Text fontSize="sm" color="gray.600" textAlign="center">
+                              This may take several minutes for comprehensive analysis. Files are intelligently prioritized for faster processing.
+                            </Text>
+                            <HStack>
+                              <Spinner size="sm" />
+                              <Text fontSize="sm">Processing in background...</Text>
+                            </HStack>
+                          </VStack>
                         </Box>
                       )}
                     </Box>
@@ -967,6 +1073,7 @@ function App() {
                                       <AccordionPanel>
                                         <VStack align="stretch" spacing={3}>
                                           <Box>
+                                            <Text fontSize="sm" fontWeight="bold" mb={1}>Original Code:</Text>
                                             <Box bg="gray.100" p={3} borderRadius="md" overflow="auto">
                                               <Code fontSize="sm" whiteSpace="pre-wrap">
                                                 {issue.original_code}
@@ -1100,6 +1207,114 @@ function App() {
                         </SimpleGrid>
                       </CardBody>
                     </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <Heading size="md" color="blue.600">Interaction Analysis</Heading>
+                      </CardHeader>
+                      <CardBody>
+                        <SimpleGrid columns={[2, 4]} spacing={4}>
+                          <Stat>
+                            <StatLabel>Touch Issues</StatLabel>
+                            <StatNumber>{infotainmentInsights.interaction_analysis.touch_issues}</StatNumber>
+                          </Stat>
+                          <Stat>
+                            <StatLabel>Voice Issues</StatLabel>
+                            <StatNumber>{infotainmentInsights.interaction_analysis.voice_issues}</StatNumber>
+                          </Stat>
+                          <Stat>
+                            <StatLabel>Physical Button</StatLabel>
+                            <StatNumber>{infotainmentInsights.interaction_analysis.physical_button_issues}</StatNumber>
+                          </Stat>
+                          <Stat>
+                            <StatLabel>Steering Wheel</StatLabel>
+                            <StatNumber>{infotainmentInsights.interaction_analysis.steering_wheel_issues}</StatNumber>
+                          </Stat>
+                        </SimpleGrid>
+                      </CardBody>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <Heading size="md" color="purple.600">Standards Compliance</Heading>
+                      </CardHeader>
+                      <CardBody>
+                        <SimpleGrid columns={[1, 3]} spacing={4}>
+                          <Box>
+                            <Text fontWeight="bold" mb={2}>WCAG Violations</Text>
+                            <VStack align="start" spacing={1}>
+                              <HStack>
+                                <Badge colorScheme="red">Level A</Badge>
+                                <Text>{infotainmentInsights.standards_compliance.wcag_a_violations}</Text>
+                              </HStack>
+                              <HStack>
+                                <Badge colorScheme="orange">Level AA</Badge>
+                                <Text>{infotainmentInsights.standards_compliance.wcag_aa_violations}</Text>
+                              </HStack>
+                              <HStack>
+                                <Badge colorScheme="yellow">Level AAA</Badge>
+                                <Text>{infotainmentInsights.standards_compliance.wcag_aaa_violations}</Text>
+                              </HStack>
+                            </VStack>
+                          </Box>
+                          <Box>
+                            <Text fontWeight="bold" mb={2}>Automotive Standards</Text>
+                            <VStack align="start" spacing={1}>
+                              <HStack>
+                                <Badge colorScheme="green">ISO 15008</Badge>
+                                <Text>{infotainmentInsights.standards_compliance.iso15008_issues}</Text>
+                              </HStack>
+                              <HStack>
+                                <Badge colorScheme="orange">NHTSA</Badge>
+                                <Text>{infotainmentInsights.standards_compliance.nhtsa_issues}</Text>
+                              </HStack>
+                            </VStack>
+                          </Box>
+                          <Box>
+                            <Text fontWeight="bold" mb={2}>Overall Compliance</Text>
+                            <CircularProgress
+                              value={Math.max(0, 100 - (issues.length * 2))}
+                              color="green.400"
+                              size="80px"
+                            >
+                              <CircularProgressLabel>
+                                {Math.max(0, 100 - (issues.length * 2))}%
+                              </CircularProgressLabel>
+                            </CircularProgress>
+                          </Box>
+                        </SimpleGrid>
+                      </CardBody>
+                    </Card>
+
+                    {/* Recommendations */}
+                    {infotainmentInsights.recommendations && infotainmentInsights.recommendations.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <Heading size="md" color="teal.600">Recommendations</Heading>
+                        </CardHeader>
+                        <CardBody>
+                          <VStack align="stretch" spacing={3}>
+                            {infotainmentInsights.recommendations.map((rec, index) => (
+                              <Alert
+                                key={index}
+                                status={rec.priority === 'critical' ? 'error' : rec.priority === 'high' ? 'warning' : 'info'}
+                              >
+                                <AlertIcon />
+                                <VStack align="start" spacing={1}>
+                                  <HStack>
+                                    <Badge colorScheme={rec.priority === 'critical' ? 'red' : rec.priority === 'high' ? 'orange' : 'blue'}>
+                                      {rec.priority.toUpperCase()}
+                                    </Badge>
+                                    <Text fontWeight="bold">{rec.category}</Text>
+                                  </HStack>
+                                  <Text>{rec.message}</Text>
+                                </VStack>
+                              </Alert>
+                            ))}
+                          </VStack>
+                        </CardBody>
+                      </Card>
+                    )}
                   </VStack>
                 ) : (
                   <Box textAlign="center" py={10}>
@@ -1132,11 +1347,46 @@ function App() {
                               <Text fontSize="sm" color="gray.600">
                                 {new Date(analysis.created_at).toLocaleString()}
                               </Text>
+                              {analysis.models && (
+                                <Text fontSize="xs" color="gray.500">
+                                  Models: {analysis.models.join(', ')}
+                                </Text>
+                              )}
                             </VStack>
-                            <VStack align="end" spacing={1}>
-                              <Text fontSize="sm">
-                                {analysis.context_type || 'infotainment'}
-                              </Text>
+                            <VStack spacing={2}>
+                              <Button
+                                size="sm"
+                                colorScheme="blue"
+                                onClick={async () => {
+                                  try {
+                                    const response = await fetch(`${API_URL}/analysis/${analysis.id}`, {
+                                      headers: { 'Authorization': `Bearer ${token}` }
+                                    });
+                                    if (response.ok) {
+                                      const data = await response.json();
+                                      setCurrentAnalysis(data.analysis);
+                                      setIssues(data.issues || []);
+                                      setAnalysisStatus('completed');
+                                      setSelectedStandards(data.analysis.selected_standards || []);
+
+                                      // Fetch insights for this analysis
+                                      fetchInfotainmentInsights(analysis.id);
+
+                                      toast({
+                                        title: `Analysis loaded: ${data.issues.length} issues found`,
+                                        status: 'success'
+                                      });
+                                    } else {
+                                      toast({ title: 'Failed to load analysis', status: 'error' });
+                                    }
+                                  } catch (error) {
+                                    console.error('Load analysis error:', error);
+                                    toast({ title: 'Failed to load analysis', status: 'error' });
+                                  }
+                                }}
+                              >
+                                Load Analysis
+                              </Button>
                             </VStack>
                           </Flex>
                         </CardBody>
