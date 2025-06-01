@@ -58,9 +58,13 @@ import {
   CircularProgress,
   CircularProgressLabel,
   Skeleton,
-  SkeletonText
+  SkeletonText,
+  IconButton
 } from '@chakra-ui/react';
-import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon, InfoIcon } from '@chakra-ui/icons';
+import { WarningIcon, CheckIcon, DownloadIcon, RepeatIcon, InfoIcon, ViewIcon } from '@chakra-ui/icons';
+
+// Import the new CodeIssueModal component
+import CodeIssueModal from './CodeIssueModal';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -204,6 +208,7 @@ function App() {
 
   // Modal controls
   const { isOpen: isLoginOpen, onOpen: onLoginOpen, onClose: onLoginClose } = useDisclosure();
+  const { isOpen: isCodeModalOpen, onOpen: onCodeModalOpen, onClose: onCodeModalClose } = useDisclosure();
 
   // Application state
   const [files, setFiles] = useState([]);
@@ -234,7 +239,37 @@ function App() {
   const [uploadProgress, setUploadProgress] = useState(null);
   const [filteringStats, setFilteringStats] = useState(null);
 
+  // Code modal state
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [selectedFileContent, setSelectedFileContent] = useState('');
+
   const toast = useToast();
+
+  // Function to open code modal with issue details
+  const openCodeModal = (issue) => {
+    if (!currentAnalysis?.file_contents) {
+      toast({
+        title: 'File content not available',
+        description: 'Please reload the analysis to view code',
+        status: 'warning'
+      });
+      return;
+    }
+
+    const fileContent = currentAnalysis.file_contents[issue.file];
+    if (!fileContent) {
+      toast({
+        title: 'File not found',
+        description: `Could not find content for ${issue.file}`,
+        status: 'error'
+      });
+      return;
+    }
+
+    setSelectedIssue(issue);
+    setSelectedFileContent(fileContent);
+    onCodeModalOpen();
+  };
 
   // Initial data loading with better error handling
   useEffect(() => {
@@ -1364,6 +1399,17 @@ function App() {
                                 <Flex justify="space-between" align="center" pt={2}>
                                   <Box />
                                   <HStack>
+                                    {/* New View Code & Interface button */}
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      colorScheme="purple"
+                                      leftIcon={<ViewIcon />}
+                                      onClick={() => openCodeModal(issue)}
+                                    >
+                                      View Code & Interface
+                                    </Button>
+
                                     {issue.fix_applied ? (
                                       <>
                                         <Badge colorScheme="green" variant="solid">
@@ -1665,6 +1711,15 @@ function App() {
             </TabPanels>
           </Tabs>
         </Box>
+
+        {/* Code Issue Modal */}
+        <CodeIssueModal
+          isOpen={isCodeModalOpen}
+          onClose={onCodeModalClose}
+          issue={selectedIssue}
+          fileContent={selectedFileContent}
+          allFileContents={currentAnalysis?.file_contents}
+        />
       </Box>
     </ChakraProvider>
   );
