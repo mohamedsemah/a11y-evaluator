@@ -308,27 +308,31 @@ function DashboardWidget({ speed, fuel }) {
 ## 🗂️ Project Structure
 
 ```
+
 llm-accessibility-analyzer/
-├── 📁 backend/
-│   ├── backend.py              # FastAPI main server
-│   ├── models.py               # Database models & schemas
-│   ├── llm_analyzer.py         # AI analysis engine
-│   └── requirements.txt        # Python dependencies
-├── 📁 frontend/
-│   ├── src/
-│   │   ├── App.jsx             # Main React application
-│   │   ├── CodeIssueModal.jsx  # Code viewer component
-│   │   └── components/         # Reusable UI components
-│   ├── package.json            # Node.js dependencies
-│   └── vite.config.js          # Build configuration
-├── 📁 database/
-│   ├── init-db.sql             # Database initialization
-│   └── migrations/             # Schema migrations
-├── 📁 docker/
-│   ├── docker-compose.yml      # Multi-container setup
-│   ├── Dockerfile.backend      # Python API container
-│   └── Dockerfile.frontend     # React app container
-└── 📄 README.md               # This file
+│
+├── backend.py                 # Main API routes and server setup
+├── backend_utils.py           # Utility functions and processing logic
+├── models.py                  # SQLAlchemy database models
+├── llm_analyzer.py            # LLM integration and analysis logic
+├── init-db.sql                # PostgreSQL schema and setup
+├── requirements.txt           # Python dependencies
+├── .env                       # Environment variables
+├── package.json               # Node.js dependencies
+├── README.md                  # Setup and usage instructions
+│
+├── src/                       # Frontend source directory
+│   ├── App.jsx                # React application 
+│   └── components.jsx                
+│   ├── tabs.jsx                
+│   ├── theme.js              
+│   └── main.jsx               # React entry point 
+│
+├── index.html                 # HTML entry point
+├── vite.config.js             # Vite configuration 
+│
+└── .gitignore                 # Git ignore file 
+
 ```
 
 ## 🤝 Contributing
