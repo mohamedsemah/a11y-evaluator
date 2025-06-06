@@ -10,7 +10,7 @@ httpx==0.25.2
 
 # LLM API clients (optional - graceful fallback if missing)
 openai>=1.3.0
-anthropic>=0.7.0
+anthropic>=0.8.0
 replicate>=0.22.0
 
 # Document processing
@@ -21,9 +21,12 @@ Pillow==10.1.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
 
+# CSS parsing (optional - for CSS analysis)
+cssutils>=2.6.0
+
 # Data processing
 chardet==5.2.0
 
 # Optional: Additional analysis tools
-# selenium==4.15.2  # For browser automation if needed
-# requests==2.31.0  # Additional HTTP client
+selenium==4.15.2  # For browser automation if needed
+requests==2.31.0  # Additional HTTP client
