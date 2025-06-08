@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Infotainment System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+            user-select: none;
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            position: relative;
+        }
+
+        #infotainment-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Status Bar */
+        #status-bar {
+            height: 30px;
+            background-color: #111;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 15px;
+            font-size: 12px;
+            border-bottom: 1px solid #333;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+        }
+
+        .status-icon {
+            margin-right: 5px;
+        }
+
+        /* Main Container */
+        #main-container {
+            flex: 1;
+            display: flex;
+            position: relative;
+        }
+
+        /* Side Menu */
+        #side-menu {
+            width: 80px;
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border-right: 1px solid #333;
+        }
+
+        .menu-item {
+            width: 100%;
+            height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .menu-item:hover, .menu-item.active {
+            background-color: #222;
+        }
+
+        .menu-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .menu-label {
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        /* Content Area */
+        #content-area {
+            flex: 1;
+            padding: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Home Screen */
+        .screen {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            padding: 15px;
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        /* Home Screen */
+        #home-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #digital-clock {
+            font-size: 72px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        #digital-date {
+            font-size: 24px;
+            margin-bottom: 30px;
+        }
+
+        #weather-widget {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 40px;
+        }
+
+        #weather-icon {
+            font-size: 48px;
+            margin-right: 15px;
+        }
+
+        #weather-info {
+            text-align: left;
+        }
+
+        #weather-temp {
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        #weather-desc {
+            font-size: 18px;
+        }
+
+        /* Navigation Screen */
+        #navigation-screen {
+            position: relative;
+        }
+
+        #map-container {
+            width: 100%;
+            height: 100%;
+            background-color: #1a2632;
+            border-radius: 5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .map-element {
+            position: absolute;
+        }
+
+        .road {
+            background-color: #333;
+        }
+
+        .highway {
+            background-color: #444;
+        }
+
+        .water {
+            background-color: #246;
+        }
+
+        .land {
+            background-color: #274;
+        }
+
+        .building {
+            background-color: #555;
+        }
+
+        #navigation-controls {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .nav-control {
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-size: 24px;
+        }
+
+        #search-destination {
+            flex: 1;
+            margin: 0 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 25px;
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+        }
+
+        #search-destination input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: white;
+            padding: 10px;
+            outline: none;
+        }
+
+        /* Music Screen */
+        #music-screen {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #now-playing {
+            display: flex;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        #album-art {
+            width: 150px;
+            height: 150px;
+            background-color: #333;
+            border-radius: 5px;
+            margin-right: 20px;
+            background-image: url('/api/placeholder/150/150');
+            background-size: cover;
+        }
+
+        #track-info {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        #track-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        #track-artist {
+            font-size: 18px;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+
+        #playback-controls {
+            display: flex;
+            align-items: center;
+        }
+
+        .playback-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 15px;
+            cursor: pointer;
+        }
+
+        #play-pause-button {
+            width: 50px;
+            height: 50px;
+            background-color: #0066cc;
+        }
+
+        #progress-bar-container {
+            padding: 0 20px;
+            margin-bottom: 20px;
+        }
+
+        #progress-bar {
+            height: 4px;
+            background-color: #333;
+            border-radius: 2px;
+            position: relative;
+        }
+
+        #progress-fill {
+            position: absolute;
+            height: 100%;
+            background-color: #0066cc;
+            border-radius: 2px;
+            width: 35%;
+        }
+
+        #time-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #ccc;
+            margin-top: 5px;
+        }
+
+        #playlist {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .playlist-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            border-bottom: 1px solid #222;
+            cursor: pointer;
+        }
+
+        .playlist-item:hover {
+            background-color: #222;
+        }
+
+        .playlist-item.active {
+            background-color: #1a1a1a;
+            border-left: 3px solid #0066cc;
+        }
+
+        .track-number {
+            width: 30px;
+            font-size: 14px;
+            color: #999;
+        }
+
+        .track-name {
+            flex: 1;
+        }
+
+        .track-duration {
+            font-size: 14px;
+            color: #999;
+        }
+
+        /* Climate Screen */
+        #climate-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 40px;
+        }
+
+        #temperature-display {
+            font-size: 72px;
+            font-weight: bold;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .temp-unit {
+            font-size: 32px;
+            position: absolute;
+            top: 12px;
+            right: -30px;
+        }
+
+        #climate-controls {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            max-width: 600px;
+            margin-bottom: 60px;
+        }
+
+        .climate-control {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .climate-icon {
+            font-size: 32px;
+            margin-bottom: 15px;
+        }
+
+        .climate-label {
+            font-size: 14px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .climate-value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #airflow-display {
+            margin-top: 40px;
+            width: 300px;
+            height: 150px;
+            background-color: #222;
+            border-radius: 5px;
+            position: relative;
+        }
+
+        .vent {
+            position: absolute;
+            width: 30px;
+            height: 10px;
+            background-color: #444;
+            border-radius: 2px;
+        }
+
+        .vent-top-left {
+            top: 20px;
+            left: 40px;
+        }
+
+        .vent-top-right {
+            top: 20px;
+            right: 40px;
+        }
+
+        .vent-center-left {
+            top: 70px;
+            left: 30px;
+        }
+
+        .vent-center-right {
+            top: 70px;
+            right: 30px;
+        }
+
+        .vent-bottom-left {
+            bottom: 20px;
+            left: 60px;
+        }
+
+        .vent-bottom-right {
+            bottom: 20px;
+            right: 60px;
+        }
+
+        .vent.active {
+            background-color: #0066cc;
+            box-shadow: 0 0 10px #0066cc;
+        }
+
+        /* Phone Screen */
+        #phone-screen {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #phone-tabs {
+            display: flex;
+            border-bottom: 1px solid #333;
+            margin-bottom: 20px;
+        }
+
+        .phone-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+
+        .phone-tab.active {
+            border-color: #0066cc;
+        }
+
+        #contacts-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .contact-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #222;
+            cursor: pointer;
+        }
+
+        .contact-item:hover {
+            background-color: #222;
+        }
+
+        .contact-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 15px;
+            font-size: 20px;
+            background-image: url('/api/placeholder/50/50');
+            background-size: cover;
+        }
+
+        .contact-info {
+            flex: 1;
+        }
+
+        .contact-name {
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .contact-number {
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .contact-actions {
+            display: flex;
+        }
+
+        .contact-action {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+
+        .contact-action.call {
+            background-color: #2ecc71;
+        }
+
+        .contact-action.message {
+            background-color: #3498db;
+        }
+
+        /* Settings Screen */
+        #settings-screen {
+            padding: 20px;
+        }
+
+        .settings-section {
+            margin-bottom: 30px;
+        }
+
+        .settings-heading {
+            font-size: 24px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #222;
+        }
+
+        .setting-label {
+            font-size: 16px;
+        }
+
+        .setting-control {
+            display: flex;
+            align-items: center;
+        }
+
+        .toggle-switch {
+            width: 50px;
+            height: 24px;
+            background-color: #444;
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .toggle-switch.active {
+            background-color: #0066cc;
+        }
+
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: white;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            transition: left 0.2s;
+        }
+
+        .toggle-switch.active::after {
+            left: 28px;
+        }
+
+        .slider-control {
+            display: flex;
+            align-items: center;
+        }
+
+        .slider {
+            width: 150px;
+            height: 4px;
+            background-color: #444;
+            border-radius: 2px;
+            position: relative;
+            margin: 0 10px;
+        }
+
+        .slider-fill {
+            position: absolute;
+            height: 100%;
+            background-color: #0066cc;
+            border-radius: 2px;
+        }
+
+        .slider-handle {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            background-color: white;
+            border-radius: 50%;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+        }
+
+        .slider-value {
+            font-size: 14px;
+            min-width: 30px;
+            text-align: right;
+        }
+
+        /* System Controls */
+        #system-controls {
+            height: 60px;
+            background-color: #111;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid #333;
+        }
+
+        .system-control {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .system-icon {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+
+        .system-label {
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .system-knob {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: #333;
+            border: 3px solid #555;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .system-knob::after {
+            content: '';
+            position: absolute;
+            width: 3px;
+            height: 15px;
+            background-color: #fff;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        /* Call / Notification Popup */
+        #popup-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #popup-container {
+            width: 60%;
+            max-width: 400px;
+            background-color: #222;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        #popup-title {
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+
+        #popup-content {
+            margin-bottom: 30px;
+        }
+
+        #popup-actions {
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .popup-action {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .popup-action.accept {
+            background-color: #2ecc71;
+        }
+
+        .popup-action.decline {
+            background-color: #e74c3c;
+        }
+
+        /* Animations */
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .pulse {
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s forwards;
+        }
+
+        /* Media queries for responsiveness */
+        @media (max-width: 768px) {
+            #side-menu {
+                width: 60px;
+            }
+            
+            .menu-icon {
+                font-size: 20px;
+            }
+            
+            .menu-label {
+                font-size: 8px;
+            }
+            
+            #digital-clock {
+                font-size: 52px;
+            }
+            
+            #digital-date {
+                font-size: 18px;
+            }
+            
+            #weather-icon {
+                font-size: 36px;
+            }
+            
+            #weather-temp {
+                font-size: 24px;
+            }
+            
+            #album-art {
+                width: 100px;
+                height: 100px;
+            }
+            
+            #track-title {
+                font-size: 20px;
+            }
+            
+            #track-artist {
+                font-size: 16px;
+            }
+            
+            .playback-button {
+                width: 36px;
+                height: 36px;
+            }
+            
+            #play-pause-button {
+                width: 46px;
+                height: 46px;
+            }
+            
+            #temperature-display {
+                font-size: 60px;
+            }
+            
+            .climate-icon {
+                font-size: 28px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="infotainment-container">
+        <!-- Status Bar -->
+        <div id="status-bar">
+            <div class="status-item" id="connectivity-status">
+                <span class="status-icon">📶</span>
+                <span id="signal-strength">4G</span>
+            </div>
+            <div class="status-item" id="bluetooth-status">
+                <span class="status-icon">🟦</span>
+                <span id="bluetooth-device">Connected</span>
+            </div>
+            <div class="status-item" id="vehicle-status">
+                <span class="status-icon">⚙️</span>
+                <span id="status-text">Normal</span>
+            </div>
+        </div>
+
+        <!-- Main Container -->
+        <div id="main-container">
+            <!-- Side Menu -->
+            <div id="side-menu">
+                <div class="menu-item active" data-screen="home-screen">
+                    <div class="menu-icon">🏠</div>
+                    <div class="menu-label">Home</div>
+                </div>
+                <div class="menu-item" data-screen="navigation-screen">
+                    <div class="menu-icon">🧭</div>
+                    <div class="menu-label">Nav</div>
+                </div>
+                <div class="menu-item" data-screen="music-screen">
+                    <div class="menu-icon">🎵</div>
+                    <div class="menu-label">Music</div>
+                </div>
+                <div class="menu-item" data-screen="climate-screen">
+                    <div class="menu-icon">🌡️</div>
+                    <div class="menu-label">Climate</div>
+                </div>
+                <div class="menu-item" data-screen="phone-screen">
+                    <div class="menu-icon">📱</div>
+                    <div class="menu-label">Phone</div>
+                </div>
+                <div class="menu-item" data-screen="settings-screen">
+                    <div class="menu-icon">⚙️</div>
+                    <div class="menu-label">Settings</div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div id="content-area">
+                <!-- Home Screen -->
+                <div id="home-screen" class="screen active">
+                    <div id="digital-clock">12:34</div>
+                    <div id="digital-date">Thursday, March 27, 2025</div>
+                    <div id="weather-widget">
+                        <div id="weather-icon">🌤️</div>
+                        <div id="weather-info">
+                            <div id="weather-temp">72°F</div>
+                            <div id="weather-desc">Partly Cloudy</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation Screen -->
+                <div id="navigation-screen" class="screen">
+                    <div id="map-container">
+                        <!-- Map elements will be generated by JS -->
+                        <div class="map-element water" style="width: 30%; height: 25%; left: 70%; top: 0%;"></div>
+                        <div class="map-element land" style="width: 100%; height: 100%; left: 0%; top: 0%; z-index: 1;"></div>
+                        <div class="map-element road" style="width: 100%; height: 5%; left: 0%; top: 30%; z-index: 2;"></div>
+                        <div class="map-element road" style="width: 5%; height: 100%; left: 50%; top: 0%; z-index: 2;"></div>
+                        <div class="map-element highway" style="width: 100%; height: 8%; left: 0%; top: 60%; z-index: 3;"></div>
+                        <div class="map-element building" style="width: 10%; height: 8%; left: 20%; top: 40%; z-index: 4;"></div>
+                        <div class="map-element building" style="width: 8%; height: 10%; left: 35%; top: 42%; z-index: 4;"></div>
+                        <div class="map-element building" style="width: 12%; height: 15%; left: 60%; top: 38%; z-index: 4;"></div>
+                    </div>
+                    <div id="navigation-controls">
+                        <div class="nav-control" id="zoom-in">+</div>
+                        <div id="search-destination">
+                            <input type="text" placeholder="Search destination...">
+                        </div>
+                        <div class="nav-control" id="zoom-out">-</div>
+                    </div>
+                </div>
+
+                <!-- Music Screen -->
+                <div id="music-screen" class="screen">
+                    <div id="now-playing">
+                        <div id="album-art"></div>
+                        <div id="track-info">
+                            <div id="track-title">Driving Playlist</div>
+                            <div id="track-artist">Various Artists</div>
+                            <div id="playback-controls">
+                                <div class="playback-button" id="prev-button">⏮️</div>
+                                <div class="playback-button" id="play-pause-button">⏸️</div>
+                                <div class="playback-button" id="next-button">⏭️</div>
+                                <div class="playback-button" id="shuffle-button">🔀</div>
+                                <div class="playback-button" id="repeat-button">🔁</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="progress-bar-container">
+                        <div id="progress-bar">
+                            <div id="progress-fill"></div>
+                        </div>
+                        <div id="time-info">
+                            <span id="current-time">1:45</span>
+                            <span id="total-time">4:30</span>
+                        </div>
+                    </div>
+                    <div id="playlist">
+                        <div class="playlist-item active">
+                            <div class="track-number">1</div>
+                            <div class="track-name">Highway Cruiser</div>
+                            <div class="track-duration">4:30</div>
+                        </div>
+                        <div class="playlist-item">
+                            <div class="track-number">2</div>
+                            <div class="track-name">Sunset Drive</div>
+                            <div class="track-duration">3:45</div>
+                        </div>
+                        <div class="playlist-item">
+                            <div class="track-number">3</div>
+                            <div class="track-name">City Lights</div>
+                            <div class="track-duration">5:12</div>
+                        </div>
+                        <div class="playlist-item">
+                            <div class="track-number">4</div>
+                            <div class="track-name">Mountain Roads</div>
+                            <div class="track-duration">4:08</div>
+                        </div>
+                        <div class="playlist-item">
+                            <div class="track-number">5</div>
+                            <div class="track-name">Open Highway</div>
+                            <div class="track-duration">3:57</div>
+                        </div>
+                        <div class="playlist-item">
+                            <div class="track-number">6</div>
+                            <div class="track-name">Night Driving</div>
+                            <div class="track-duration">4:22</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Climate Screen -->
+                <div id="climate-screen" class="screen">
+                    <div id="temperature-display">
+                        72<span class="temp-unit">°F</span>
+                    </div>
+                    <div id="climate-controls">
+                        <div class="climate-control">
+                            <div class="climate-icon">🌬️</div>
+                            <div class="climate-label">Fan</div>
+                            <div class="climate-value">3</div>
+                        </div>
+                        <div class="climate-control">
+                            <div class="climate-icon">🔄</div>
+                            <div class="climate-label">Mode</div>
+                            <div class="climate-value">Auto</div>
+                        </div>
+                        <div class="climate-control">
+                            <div class="climate-icon">↕️</div>
+                            <div class="climate-label">Direction</div>
+                            <div class="climate-value">Face</div>
+                        </div>
+                        <div class="climate-control">
+                            <div class="climate-icon">❄️</div>
+                            <div class="climate-label">A/C</div>
+                            <div class="climate-value">On</div>
+                        </div>
+                    </div>
+                    <div id="airflow-display">
+                        <div class="vent vent-top-left active"></div>
+                        <div class="vent vent-top-right active"></div>
+                        <div class="vent vent-center-left active"></div>
+                        <div class="vent vent-center-right active"></div>
+                        <div class="vent vent-bottom-left"></div>
+                        <div class="vent vent-bottom-right"></div>
+                    </div>
+                </div>
+
+                <!-- Phone Screen -->
+                <div id="phone-screen" class="screen">
+                    <div id="phone-tabs">
+                        <div class="phone-tab active">Contacts</div>
+                        <div class="phone-tab">Recent</div>
+                        <div class="phone-tab">Favorites</div>
+                    </div>
+                    <div id="contacts-list">
+                        <div class="contact-item">
+                            <div class="contact-avatar"></div>
+                            <div class="contact-info">
+                                <div class="contact-name">Alex Johnson</div>
+                                <div class="contact-number">555-123-4567</div>
+                            </div>
+                            <div class="contact-actions">
+                                <div class="contact-action call">📞</div>
+                                <div class="contact-action message">✉️</div>
+                            </div>
+                        </div>
+                        <div class="contact-item">
+                            <div class="contact-avatar"></div>
+                            <div class="contact-info">
+                                <div class="contact-name">Sam Taylor</div>
+                                <div class="contact-number">555-987-6543</div>
+                            </div>
+                            <div class="contact-actions">
+                                <div class="contact-action call">📞</div>
+                                <div class="contact-action message">✉️</div>
+                            </div>
+                        </div>

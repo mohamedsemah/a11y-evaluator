@@ -40,6 +40,11 @@ htmlcov/
 .docker/
 
 package.json
-package-lock.json
 
 sample/
+
+backend/temp_sessions
+backend/.env
+backend/__pycache__
+frontend/node_modules
+frontend/package-lock.json
