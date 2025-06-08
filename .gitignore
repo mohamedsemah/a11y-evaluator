@@ -42,6 +42,6 @@ htmlcov/
 
 sample/
 
-temp_sessions/
+backend/temp_sessions/
 
 package-lock.json
