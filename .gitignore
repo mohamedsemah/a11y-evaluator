@@ -39,7 +39,6 @@ htmlcov/
 # Docker
 .docker/
 
-
 sample/
 
 backend/temp_sessions/
