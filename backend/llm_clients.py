@@ -12,8 +12,20 @@ import replicate
 class LLMClient:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.anthropic_client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        self.replicate_client = replicate.Client(api_token=os.getenv("REPLICATE_API_TOKEN"))
+
+        # Fix for Anthropic API - use the correct async client initialization
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            self.anthropic_client = anthropic.AsyncAnthropic(api_key=anthropic_key)
+        else:
+            self.anthropic_client = None
+
+        replicate_token = os.getenv("REPLICATE_API_TOKEN")
+        if replicate_token:
+            self.replicate_client = replicate.Client(api_token=replicate_token)
+        else:
+            self.replicate_client = None
+
         self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
 
         # Enhanced WCAG 2.2 Detection Prompt - Comprehensive and Systematic
@@ -574,13 +586,24 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
             raise Exception(f"OpenAI API error: {str(e)}")
 
     async def _call_anthropic(self, prompt: str) -> Dict[str, Any]:
-        """Call Anthropic Claude API"""
+        """Call Anthropic Claude API with proper async handling"""
         try:
+            if not self.anthropic_client:
+                raise Exception("Anthropic API key not configured")
+
+            # Use the correct async method for the newer Anthropic library
             response = await self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4000
+                model="claude-3-haiku-20240307",  # Using Haiku as it's more available
+                max_tokens=4000,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
             )
+
+            # Extract content from the response
             content = response.content[0].text
             return self._parse_json_response(content)
 
@@ -590,6 +613,9 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
     async def _call_deepseek(self, prompt: str) -> Dict[str, Any]:
         """Call DeepSeek API"""
         try:
+            if not self.deepseek_api_key:
+                raise Exception("DeepSeek API key not configured")
+
             async with aiohttp.ClientSession() as session:
                 headers = {
                     "Authorization": f"Bearer {self.deepseek_api_key}",
@@ -628,6 +654,9 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
     async def _call_replicate(self, prompt: str) -> Dict[str, Any]:
         """Call Replicate API for LLaMA"""
         try:
+            if not self.replicate_client:
+                raise Exception("Replicate API token not configured")
+
             output = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.replicate_client.run(

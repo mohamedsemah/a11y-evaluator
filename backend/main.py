@@ -15,6 +15,7 @@ import mimetypes
 from pydantic import BaseModel
 import logging
 import traceback
+import sys
 
 from llm_clients import LLMClient
 from wcag_analyzer import WCAGAnalyzer
@@ -26,16 +27,80 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure detailed logging
+# Fix Unicode encoding issues on Windows
+if sys.platform.startswith('win'):
+    # Set environment variable to force UTF-8 encoding
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+
+    # Reconfigure stdout and stderr to use UTF-8
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+
+
+# Configure detailed logging with UTF-8 encoding
+class UTF8FileHandler(logging.FileHandler):
+    def __init__(self, filename, mode='a', encoding='utf-8', delay=False):
+        super().__init__(filename, mode, encoding, delay)
+
+
+class UTF8StreamHandler(logging.StreamHandler):
+    def __init__(self, stream=None):
+        super().__init__(stream)
+
+    def emit(self, record):
+        try:
+            super().emit(record)
+        except UnicodeEncodeError:
+            # Replace problematic Unicode characters with safe alternatives
+            msg = self.format(record)
+            safe_msg = msg.encode('ascii', errors='replace').decode('ascii')
+            # Replace the Unicode checkmark with a simple [OK]
+            safe_msg = safe_msg.replace('�', '[OK]')
+            print(safe_msg)
+
+
+# Setup logging with UTF-8 support
+log_formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# File handler with UTF-8 encoding
+file_handler = UTF8FileHandler('accessibility_analyzer.log')
+file_handler.setFormatter(log_formatter)
+
+# Console handler with Unicode fallback
+console_handler = UTF8StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+
+# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('accessibility_analyzer.log')
-    ]
+    handlers=[console_handler, file_handler]
 )
+
 logger = logging.getLogger(__name__)
+
+
+# Safe logging functions that replace Unicode with ASCII alternatives
+def log_success(message):
+    """Log success message with safe Unicode handling"""
+    safe_message = message.replace('✅', '[SUCCESS]')
+    logger.info(safe_message)
+
+
+def log_error(message):
+    """Log error message with safe Unicode handling"""
+    safe_message = message.replace('❌', '[ERROR]')
+    logger.error(safe_message)
+
+
+def log_warning(message):
+    """Log warning message with safe Unicode handling"""
+    safe_message = message.replace('⚠️', '[WARNING]')
+    logger.warning(safe_message)
+
 
 app = FastAPI(title="Infotainment Accessibility Analyzer", version="1.0.0")
 
@@ -183,18 +248,18 @@ async def analyze_accessibility(request: AnalysisRequest):
         logger.info("Initializing LLM client...")
         try:
             llm_client = LLMClient()
-            logger.info("✅ LLM client initialized successfully")
+            log_success("LLM client initialized successfully")
         except Exception as e:
-            logger.error(f"❌ LLM client initialization failed: {str(e)}")
+            log_error(f"LLM client initialization failed: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"LLM client initialization failed: {str(e)}")
 
         logger.info("Initializing WCAG analyzer...")
         try:
             wcag_analyzer = WCAGAnalyzer()
-            logger.info("✅ WCAG analyzer initialized successfully")
+            log_success("WCAG analyzer initialized successfully")
         except Exception as e:
-            logger.error(f"❌ WCAG analyzer initialization failed: {str(e)}")
+            log_error(f"WCAG analyzer initialization failed: {str(e)}")
             raise HTTPException(status_code=500, detail=f"WCAG analyzer initialization failed: {str(e)}")
 
         results = {}
@@ -223,10 +288,9 @@ async def analyze_accessibility(request: AnalysisRequest):
                     try:
                         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                             content = f.read()
-                        logger.info(
-                            f"✅ File read successfully: {len(content)} characters, {len(content.split())} lines")
+                        log_success(f"File read successfully: {len(content)} characters, {len(content.split())} lines")
                     except Exception as e:
-                        logger.error(f"❌ Failed to read file {file_path}: {str(e)}")
+                        log_error(f"Failed to read file {file_path}: {str(e)}")
                         model_results.append({
                             "file_info": file_info,
                             "error": f"Failed to read file: {str(e)}",
@@ -249,18 +313,18 @@ async def analyze_accessibility(request: AnalysisRequest):
                                 content, file_info["name"], model
                             )
 
-                        logger.info(f"✅ LLM analysis completed")
+                        log_success("LLM analysis completed")
                         logger.info(f"Result keys: {list(analysis_result.keys())}")
 
                         # Log the result structure for debugging
                         if analysis_result.get("error"):
-                            logger.error(f"❌ LLM returned error: {analysis_result['error']}")
+                            log_error(f"LLM returned error: {analysis_result['error']}")
                         else:
                             issues_count = len(analysis_result.get("issues", []))
                             logger.info(f"Found {issues_count} issues")
 
                     except Exception as e:
-                        logger.error(f"❌ LLM analysis failed: {str(e)}")
+                        log_error(f"LLM analysis failed: {str(e)}")
                         logger.error(f"Exception type: {type(e).__name__}")
                         logger.error(f"Traceback: {traceback.format_exc()}")
 
@@ -278,9 +342,9 @@ async def analyze_accessibility(request: AnalysisRequest):
                         processed_result = wcag_analyzer.process_llm_result(
                             analysis_result, file_info, content
                         )
-                        logger.info("✅ WCAG processing completed")
+                        log_success("WCAG processing completed")
                     except Exception as e:
-                        logger.error(f"❌ WCAG processing failed: {str(e)}")
+                        log_error(f"WCAG processing failed: {str(e)}")
                         logger.error(f"Traceback: {traceback.format_exc()}")
 
                         # Fallback to basic result structure
@@ -293,10 +357,10 @@ async def analyze_accessibility(request: AnalysisRequest):
                         }
 
                     model_results.append(processed_result)
-                    logger.info(f"✅ File processing completed for {file_info['name']}")
+                    log_success(f"File processing completed for {file_info['name']}")
 
                 except Exception as e:
-                    logger.error(f"❌ Unexpected error processing file {file_info['name']}: {str(e)}")
+                    log_error(f"Unexpected error processing file {file_info['name']}: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     model_results.append({
                         "file_info": file_info,
@@ -306,7 +370,7 @@ async def analyze_accessibility(request: AnalysisRequest):
                     })
 
             results[model] = model_results
-            logger.info(f"✅ Model {model} processing completed: {len(model_results)} files processed")
+            log_success(f"Model {model} processing completed: {len(model_results)} files processed")
 
         # Store results
         if request.analysis_type == "detection":
@@ -328,7 +392,7 @@ async def analyze_accessibility(request: AnalysisRequest):
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        logger.error(f"❌ ANALYSIS FAILED: {str(e)}")
+        log_error(f"ANALYSIS FAILED: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
@@ -361,7 +425,7 @@ async def remediate_issue(request: RemediationRequest):
         remediation_result = await llm_client.fix_specific_issue(
             content, request.issue_id, request.model
         )
-        logger.info("✅ Remediation completed")
+        log_success("Remediation completed")
 
         # Store remediation result
         if "remediations" not in session:
@@ -381,7 +445,7 @@ async def remediate_issue(request: RemediationRequest):
         }
 
     except Exception as e:
-        logger.error(f"❌ Remediation failed: {str(e)}")
+        log_error(f"Remediation failed: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Remediation failed: {str(e)}")
 
@@ -535,7 +599,9 @@ if __name__ == "__main__":
     Path("temp_sessions").mkdir(exist_ok=True)
 
     logger.info("Starting Infotainment Accessibility Analyzer")
-    logger.info(
-        f"API Keys configured: {len([k for k in [os.getenv('OPENAI_API_KEY'), os.getenv('ANTHROPIC_API_KEY'), os.getenv('DEEPSEEK_API_KEY'), os.getenv('REPLICATE_API_TOKEN')] if k])}/4")
+    api_key_count = len([k for k in
+                         [os.getenv('OPENAI_API_KEY'), os.getenv('ANTHROPIC_API_KEY'), os.getenv('DEEPSEEK_API_KEY'),
+                          os.getenv('REPLICATE_API_TOKEN')] if k])
+    logger.info(f"API Keys configured: {api_key_count}/4")
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
