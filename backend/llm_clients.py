@@ -7,6 +7,10 @@ from typing import Dict, List, Any, Optional, Tuple
 from openai import AsyncOpenAI
 import anthropic
 import replicate
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -71,123 +75,44 @@ SYSTEMATIC WCAG 2.2 ANALYSIS CHECKLIST:
    - Example: "Click the red button" should include other identifiers
    - For infotainment: Check voice prompts don't rely on visual-only cues
 
-5. **1.3.4 Orientation (Level AA):**
-   - Check content isn't restricted to specific orientation
-   - For infotainment: Check landscape/portrait mode support
-
-6. **1.4.1 Use of Color (Level A):**
+5. **1.4.1 Use of Color (Level A):**
    - Check information isn't conveyed by color alone
    - Check form validation errors use more than just color
    - For infotainment: Check status indicators (green/red) have additional cues
 
-7. **1.4.3 Contrast (Level AA):**
+6. **1.4.3 Contrast (Level AA):**
    - Check text contrast ratios (4.5:1 for normal text, 3:1 for large text)
    - Check UI component contrast (3:1 minimum)
    - For infotainment: Critical for readability while driving
 
-8. **1.4.11 Non-text Contrast (Level AA):**
-   - Check UI components and graphical objects have 3:1 contrast
-   - For infotainment: Check button borders, focus indicators
-
 **B. OPERABLE ISSUES (Level A/AA/AAA)**
-9. **2.1.1 Keyboard (Level A):**
+7. **2.1.1 Keyboard (Level A):**
    - Check ALL interactive elements can be reached by keyboard
    - Check for onclick without onkeydown/onkeypress handlers
    - Check custom controls have proper keyboard support
    - For infotainment: Critical for hands-free operation
 
-10. **2.1.2 No Keyboard Trap (Level A):**
-    - Check users can navigate away from any focused element
-    - Check modal dialogs have proper escape mechanisms
-    - For infotainment: Check menu navigation allows exit
+8. **2.4.7 Focus Visible (Level AA):**
+   - Check ALL focusable elements have visible focus indicators
+   - Check focus indicators have sufficient contrast
+   - For infotainment: Essential for eyes-free operation
 
-11. **2.1.4 Character Key Shortcuts (Level A):**
-    - Check single-key shortcuts can be disabled/remapped
-    - For infotainment: Check voice command conflicts
-
-12. **2.4.1 Bypass Blocks (Level A):**
-    - Check for skip links or landmark navigation
-    - For infotainment: Check quick access to main functions
-
-13. **2.4.2 Page Titled (Level A):**
-    - Check <title> elements are descriptive and unique
-    - For infotainment: Check screen/view titles
-
-14. **2.4.3 Focus Order (Level A):**
-    - Check tab order is logical and meaningful
-    - Check custom tabindex values are appropriate
-    - For infotainment: Critical for safe sequential navigation
-
-15. **2.4.7 Focus Visible (Level AA):**
-    - Check ALL focusable elements have visible focus indicators
-    - Check focus indicators have sufficient contrast
-    - For infotainment: Essential for eyes-free operation
-
-16. **2.5.1 Pointer Gestures (Level A):**
-    - Check complex gestures have simple alternatives
-    - For infotainment: Check swipe gestures have button alternatives
-
-17. **2.5.2 Pointer Cancellation (Level A):**
-    - Check touch/click actions can be cancelled
-    - For infotainment: Prevent accidental activations while driving
-
-18. **2.5.3 Label in Name (Level A):**
-    - Check accessible names include visible text labels
-    - For infotainment: Check voice control can use visible labels
-
-19. **2.5.4 Motion Actuation (Level A):**
-    - Check device motion triggers can be disabled
-    - For infotainment: Check shake/tilt controls have alternatives
-
-20. **2.5.8 Target Size (Level AA):**
-    - Check touch targets are at least 44x44 CSS pixels
-    - For infotainment: Critical for vehicle vibration/movement
+9. **2.5.8 Target Size (Level AA):**
+   - Check touch targets are at least 44x44 CSS pixels
+   - For infotainment: Critical for vehicle vibration/movement
 
 **C. UNDERSTANDABLE ISSUES (Level A/AA/AAA)**
-21. **3.1.1 Language of Page (Level A):**
-    - Check <html> element has lang attribute
-    - For infotainment: Check multilingual support
-
-22. **3.2.1 On Focus (Level A):**
-    - Check focusing elements doesn't trigger unexpected changes
-    - For infotainment: Prevent context switches while driving
-
-23. **3.2.2 On Input (Level A):**
-    - Check input changes don't cause unexpected context changes
-    - For infotainment: Check form auto-submission
-
-24. **3.3.1 Error Identification (Level A):**
-    - Check form errors are clearly identified
-    - Check error messages are associated with fields
-    - For infotainment: Check voice error announcements
-
-25. **3.3.2 Labels or Instructions (Level A):**
+10. **3.3.2 Labels or Instructions (Level A):**
     - Check ALL form fields have labels or instructions
     - Check required fields are clearly marked
     - For infotainment: Check voice input prompts
 
 **D. ROBUST ISSUES (Level A/AA/AAA)**
-26. **4.1.1 Parsing (Level A):**
-    - Check HTML is valid and well-formed
-    - Check unique IDs, proper nesting, closing tags
-    - For infotainment: Critical for screen reader compatibility
-
-27. **4.1.2 Name, Role, Value (Level A):**
+11. **4.1.2 Name, Role, Value (Level A):**
     - Check ALL UI components have accessible names
     - Check custom controls have proper ARIA roles
     - Check state changes are programmatically determinable
     - For infotainment: Check media controls, navigation states
-
-28. **4.1.3 Status Messages (Level AA):**
-    - Check important status updates use aria-live regions
-    - For infotainment: Check notifications, alerts, progress updates
-
-**INFOTAINMENT-SPECIFIC CONSIDERATIONS:**
-- **Driver Safety:** Issues that could cause distraction while driving
-- **Voice Integration:** Compatibility with voice assistants
-- **Vibration Resilience:** Touch targets robust enough for vehicle movement
-- **Emergency Access:** Critical functions accessible in emergency situations
-- **Multi-modal Input:** Support for touch, voice, and physical controls
 
 **ANALYSIS METHODOLOGY:**
 1. Go through code line by line
@@ -243,51 +168,6 @@ Current Code:
 - Description: {description}
 - Line Numbers: {line_numbers}
 - Current Code Snippet: {code_snippet}
-
-**FIX REQUIREMENTS:**
-1. **Preserve Functionality:** Don't break existing behavior
-2. **WCAG 2.2 Compliance:** Ensure fix meets specific guideline requirements
-3. **Infotainment Optimized:** Consider driver safety and vehicle environment
-4. **Code Quality:** Maintain existing code style and patterns
-5. **Performance:** Ensure fix doesn't degrade performance
-6. **Cross-Platform:** Work across different infotainment platforms
-
-**WCAG-SPECIFIC FIX GUIDANCE:**
-
-**For 1.1.1 Non-text Content:**
-- Add descriptive alt attributes: alt="descriptive text"
-- For decorative images: alt="" or role="presentation"
-- For complex images: use aria-describedby pointing to detailed description
-
-**For 2.1.1 Keyboard Access:**
-- Add tabindex="0" for custom interactive elements
-- Add onkeydown handlers: if(event.key === 'Enter' || event.key === ' ')
-- Ensure logical tab order
-
-**For 2.4.7 Focus Visible:**
-- Add CSS focus styles: :focus {{ outline: 2px solid #0066cc; }}
-- Ensure focus indicators are visible against all backgrounds
-
-**For 2.5.8 Target Size:**
-- Minimum 44x44 CSS pixels for touch targets
-- Add CSS: min-height: 44px; min-width: 44px;
-
-**For 3.3.2 Labels or Instructions:**
-- Add <label for="inputId">Label Text</label>
-- Or add aria-label="Label Text"
-- Or add aria-labelledby="labelElementId"
-
-**For 4.1.2 Name, Role, Value:**
-- Add appropriate ARIA roles: role="button", role="tab", etc.
-- Add aria-label for accessible names
-- Add aria-expanded, aria-selected for state
-
-**INFOTAINMENT BEST PRACTICES:**
-- Voice Control: Ensure labels work with voice commands
-- Large Touch Targets: Account for vehicle vibration
-- High Contrast: Readable in various lighting conditions
-- Quick Access: Critical functions easily reachable
-- Error Recovery: Clear error states and recovery paths
 
 **OUTPUT FORMAT:**
 Return ONLY valid JSON:
@@ -396,6 +276,11 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
     async def detect_accessibility_issues(self, code: str, filename: str, model: str) -> Dict[str, Any]:
         """Enhanced accessibility detection with accurate line tracking"""
         try:
+            # Check if we need to chunk the code for models with small context windows
+            if model == "llama-maverick" and len(code) > 2000:  # LLaMA has small context window
+                logger.info(f"Code too large for {model}, chunking...")
+                return await self._detect_issues_chunked(code, filename, model)
+
             # Create numbered code for accurate line reference
             numbered_code = self._create_numbered_code(code)
 
@@ -404,6 +289,8 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                 numbered_code=numbered_code,
                 filename=filename
             )
+
+            logger.info(f"Prompt length: {len(prompt)} characters")
 
             # Call the appropriate model
             raw_result = await self._call_model(prompt, model)
@@ -420,7 +307,7 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                     if validation["confidence"] >= 0.3:  # Adjust threshold as needed
                         validated_issues.append(issue)
                     else:
-                        print(f"Rejected low-confidence issue: {issue.get('issue_id', 'Unknown')}")
+                        logger.warning(f"Rejected low-confidence issue: {issue.get('issue_id', 'Unknown')}")
 
                 raw_result["issues"] = validated_issues
                 raw_result["total_issues"] = len(validated_issues)
@@ -428,6 +315,7 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
             return raw_result
 
         except Exception as e:
+            logger.error(f"Error in detect_accessibility_issues: {str(e)}")
             return {
                 "error": str(e),
                 "total_issues": 0,
@@ -438,6 +326,109 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                     "file_type": self._detect_file_type(filename)
                 }
             }
+
+    async def _detect_issues_chunked(self, code: str, filename: str, model: str) -> Dict[str, Any]:
+        """Detect accessibility issues by processing code in chunks for models with small context windows"""
+        logger.info("Starting chunked analysis for large file...")
+
+        lines = code.split('\n')
+        chunk_size = 100  # Process 100 lines at a time
+        all_issues = []
+
+        # Create a shorter, focused prompt for chunked analysis
+        chunk_prompt_template = """
+You are an accessibility expert. Analyze this code chunk for WCAG 2.2 violations.
+
+File: {filename} (Lines {start_line}-{end_line})
+Code:
+```
+{chunk_code}
+```
+
+Find accessibility issues and return JSON:
+{{
+  "issues": [
+    {{
+      "issue_id": "WCAG_X_X_X_NNN",
+      "wcag_guideline": "X.X.X Guideline Name", 
+      "severity": "A|AA|AAA",
+      "line_numbers": [line_number],
+      "description": "Issue description",
+      "code_snippet": "problematic code",
+      "recommendation": "how to fix",
+      "category": "perceivable|operable|understandable|robust"
+    }}
+  ]
+}}
+
+Focus on:
+- Missing alt attributes on images
+- Missing labels on form inputs  
+- Missing keyboard support (onclick without onkeydown)
+- Missing focus styles
+- Missing ARIA attributes
+"""
+
+        for i in range(0, len(lines), chunk_size):
+            chunk_lines = lines[i:i + chunk_size]
+            chunk_code = '\n'.join(chunk_lines)
+
+            start_line = i + 1
+            end_line = min(i + chunk_size, len(lines))
+
+            logger.info(f"Processing chunk: lines {start_line}-{end_line}")
+
+            # Skip empty chunks
+            if not chunk_code.strip():
+                continue
+
+            prompt = chunk_prompt_template.format(
+                filename=filename,
+                start_line=start_line,
+                end_line=end_line,
+                chunk_code=chunk_code
+            )
+
+            logger.info(f"Chunk prompt length: {len(prompt)} characters")
+
+            try:
+                chunk_result = await self._call_model(prompt, model)
+
+                if chunk_result.get("issues"):
+                    # Adjust line numbers to be relative to the full file
+                    for issue in chunk_result["issues"]:
+                        if "line_numbers" in issue:
+                            # Adjust line numbers by adding the chunk offset
+                            adjusted_lines = []
+                            for line_num in issue["line_numbers"]:
+                                if isinstance(line_num, int):
+                                    adjusted_lines.append(line_num + i)
+                                else:
+                                    adjusted_lines.append(line_num)
+                            issue["line_numbers"] = adjusted_lines
+
+                        # Add chunk info for debugging
+                        issue["chunk_info"] = f"Lines {start_line}-{end_line}"
+
+                    all_issues.extend(chunk_result["issues"])
+                    logger.info(f"Found {len(chunk_result['issues'])} issues in chunk")
+
+            except Exception as e:
+                logger.error(f"Error processing chunk {start_line}-{end_line}: {str(e)}")
+                continue
+
+        logger.info(f"Chunked analysis complete. Total issues found: {len(all_issues)}")
+
+        return {
+            "total_issues": len(all_issues),
+            "issues": all_issues,
+            "file_info": {
+                "filename": filename,
+                "total_lines": len(lines),
+                "file_type": self._detect_file_type(filename)
+            },
+            "analysis_method": "chunked"
+        }
 
     async def fix_accessibility_issues(self, code: str, filename: str, model: str) -> Dict[str, Any]:
         """Enhanced remediation with validation"""
@@ -477,10 +468,10 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                             all_changes.extend(fix_result.get("changes", []))
                             successful_fixes += 1
                         else:
-                            print(f"Rejected low-quality fix for issue: {issue['issue_id']}")
+                            logger.warning(f"Rejected low-quality fix for issue: {issue['issue_id']}")
 
                 except Exception as e:
-                    print(f"Failed to fix issue {issue.get('issue_id', 'Unknown')}: {str(e)}")
+                    logger.error(f"Failed to fix issue {issue.get('issue_id', 'Unknown')}: {str(e)}")
                     continue
 
         return {
@@ -549,6 +540,7 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
             else:
                 raise ValueError(f"Unsupported model: {model}")
         except Exception as e:
+            logger.error(f"Model {model} failed: {str(e)}")
             raise Exception(f"Model {model} failed: {str(e)}")
 
     async def _call_openai(self, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:
@@ -583,6 +575,7 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
             raise Exception("All OpenAI models failed or quota exceeded")
 
         except Exception as e:
+            logger.error(f"OpenAI API error: {str(e)}")
             raise Exception(f"OpenAI API error: {str(e)}")
 
     async def _call_anthropic(self, prompt: str) -> Dict[str, Any]:
@@ -608,6 +601,7 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
             return self._parse_json_response(content)
 
         except Exception as e:
+            logger.error(f"Anthropic API error: {str(e)}")
             raise Exception(f"Anthropic API error: {str(e)}")
 
     async def _call_deepseek(self, prompt: str) -> Dict[str, Any]:
@@ -649,36 +643,149 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                     return self._parse_json_response(content)
 
         except Exception as e:
+            logger.error(f"DeepSeek API error: {str(e)}")
             raise Exception(f"DeepSeek API error: {str(e)}")
 
     async def _call_replicate(self, prompt: str) -> Dict[str, Any]:
-        """Call Replicate API for LLaMA"""
+        """Call Replicate API for LLaMA with enhanced error handling and debugging"""
         try:
             if not self.replicate_client:
                 raise Exception("Replicate API token not configured")
 
-            output = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.replicate_client.run(
-                    "meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3",
-                    input={
-                        "prompt": prompt,
-                        "temperature": 0.1,
-                        "max_new_tokens": 4000,
-                        "system_prompt": "You are an expert accessibility auditor specializing in WCAG 2.2 compliance for infotainment systems."
-                    }
-                )
-            )
+            logger.info("Starting Replicate API call...")
 
-            content = "".join(output) if isinstance(output, list) else str(output)
-            return self._parse_json_response(content)
+            # Use async executor to handle the synchronous replicate client
+            loop = asyncio.get_event_loop()
+
+            def run_replicate():
+                try:
+                    # Check prompt length and choose appropriate model
+                    prompt_length = len(prompt)
+                    logger.info(f"Prompt length: {prompt_length} characters")
+
+                    if prompt_length > 12000:  # Too long even for chunking
+                        raise Exception(f"Prompt too long ({prompt_length} chars) - use chunking")
+                    elif prompt_length > 8000:
+                        # Use a model with larger context window
+                        model_version = "meta/llama-2-13b-chat:f4e2de70d66816a838a89eeeb621910adffb0dd0baba3976c96980970978018d"
+                        logger.info("Using LLaMA-2-13B for large prompt")
+                    else:
+                        # Use standard model
+                        model_version = "meta/llama-2-70b-chat:02e509c789964a7ea8736978a43525956ef40397be9033abf9fd2badfe68c9e3"
+                        logger.info("Using LLaMA-2-70B standard model")
+
+                    logger.info(f"Using model: {model_version}")
+
+                    # Create prediction
+                    prediction = self.replicate_client.run(
+                        model_version,
+                        input={
+                            "prompt": prompt,
+                            "temperature": 0.1,
+                            "max_new_tokens": 2000,  # Reduced to leave room for input
+                            "top_p": 0.9,
+                            "repetition_penalty": 1.15,
+                            "system_prompt": "You are an expert accessibility auditor. Always respond with valid JSON format."
+                        }
+                    )
+
+                    logger.info(f"Prediction type: {type(prediction)}")
+
+                    # Handle generator objects properly
+                    if hasattr(prediction, '__iter__') and not isinstance(prediction, str):
+                        # It's a generator or iterator - consume it
+                        prediction_list = list(prediction)
+                        logger.info(f"Generator consumed, got {len(prediction_list)} items")
+
+                        # Join all items
+                        content = "".join(str(item) for item in prediction_list)
+                        logger.info(f"Joined content length: {len(content)}")
+                        logger.info(f"Joined content preview: {content[:200]}...")
+
+                        return content
+                    else:
+                        # It's already a string or other object
+                        content = str(prediction)
+                        logger.info(f"Direct content length: {len(content)}")
+                        logger.info(f"Direct content preview: {content[:200]}...")
+
+                        return content
+
+                except Exception as e:
+                    logger.error(f"Replicate execution error: {str(e)}")
+                    raise e
+
+            # Run in executor with timeout
+            try:
+                content = await asyncio.wait_for(
+                    loop.run_in_executor(None, run_replicate),
+                    timeout=180  # 3 minute timeout for large prompts
+                )
+
+                logger.info("Replicate call completed successfully")
+
+            except asyncio.TimeoutError:
+                logger.error("Replicate API call timed out")
+                raise Exception("Replicate API call timed out after 3 minutes")
+
+            logger.info(f"Final content length: {len(content)}")
+            logger.info(f"Final content preview: {content[:500]}...")
+
+            # Clean up the content
+            content = content.strip()
+
+            if not content:
+                logger.error("Empty response from Replicate")
+                raise Exception("Empty response from Replicate API")
+
+            # Check if content looks like a generator string representation
+            if content.startswith('<generator object') or 'generator' in content:
+                logger.error("Received generator string representation instead of actual content")
+                raise Exception("Replicate returned generator object string representation")
+
+            # Try to parse as JSON
+            try:
+                parsed_result = self._parse_json_response(content)
+                logger.info("Successfully parsed JSON response")
+                return parsed_result
+
+            except Exception as parse_error:
+                logger.error(f"JSON parsing failed: {str(parse_error)}")
+                logger.error(f"Content that failed to parse: {content[:1000]}...")
+
+                # Return a fallback response with error details
+                return {
+                    "total_issues": 0,
+                    "issues": [],
+                    "error": f"Failed to parse LLM response as JSON: {str(parse_error)}",
+                    "raw_response": content[:1000] + "..." if len(content) > 1000 else content,
+                    "file_info": {
+                        "filename": "unknown",
+                        "total_lines": 0,
+                        "file_type": "unknown"
+                    }
+                }
 
         except Exception as e:
-            raise Exception(f"Replicate API error: {str(e)}")
+            logger.error(f"Replicate API error: {str(e)}")
+            return {
+                "total_issues": 0,
+                "issues": [],
+                "error": f"Replicate API error: {str(e)}",
+                "raw_response": "",
+                "file_info": {
+                    "filename": "unknown",
+                    "total_lines": 0,
+                    "file_type": "unknown"
+                }
+            }
 
     def _parse_json_response(self, content: str) -> Dict[str, Any]:
         """Enhanced JSON parsing with better error handling"""
         try:
+            # Log the content for debugging
+            logger.debug(f"Parsing content: {content[:200]}...")
+
             # Remove markdown code blocks
             if "```json" in content:
                 start = content.find("```json") + 7
@@ -691,32 +798,66 @@ CRITICAL: Provide complete fixed file content with // FIXED comments marking all
                 if end != -1:
                     content = content[start:end].strip()
 
-            # Try to parse JSON
-            parsed = json.loads(content)
+            # Try to find JSON object in the response
+            json_start = content.find('{')
+            json_end = content.rfind('}')
 
-            # Validate required fields
-            if not isinstance(parsed.get("issues"), list):
-                parsed["issues"] = []
-            if not isinstance(parsed.get("total_issues"), int):
-                parsed["total_issues"] = len(parsed.get("issues", []))
+            if json_start != -1 and json_end != -1 and json_end > json_start:
+                json_content = content[json_start:json_end + 1]
+                logger.debug(f"Extracted JSON: {json_content[:200]}...")
 
-            return parsed
+                try:
+                    parsed = json.loads(json_content)
+                    logger.info("Successfully parsed JSON")
 
-        except json.JSONDecodeError as e:
-            # Extract any JSON-like content if possible
+                    # Validate required fields
+                    if not isinstance(parsed.get("issues"), list):
+                        parsed["issues"] = []
+                    if not isinstance(parsed.get("total_issues"), int):
+                        parsed["total_issues"] = len(parsed.get("issues", []))
+
+                    return parsed
+
+                except json.JSONDecodeError as json_error:
+                    logger.error(f"JSON decode error: {str(json_error)}")
+                    logger.error(f"JSON content: {json_content}")
+
+            # If JSON parsing fails, try to extract any valid JSON-like content
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 try:
-                    return json.loads(json_match.group())
-                except:
+                    parsed = json.loads(json_match.group())
+                    logger.info("Successfully parsed JSON from regex match")
+                    return parsed
+                except json.JSONDecodeError:
                     pass
 
             # Fallback response
+            logger.warning("Could not parse response as JSON, returning fallback")
             return {
                 "total_issues": 0,
                 "issues": [],
-                "error": f"Failed to parse LLM response as JSON: {str(e)}",
-                "raw_response": content[:500] + "..." if len(content) > 500 else content
+                "error": f"Failed to parse LLM response as JSON: Content does not contain valid JSON",
+                "raw_response": content[:500] + "..." if len(content) > 500 else content,
+                "file_info": {
+                    "filename": "unknown",
+                    "total_lines": 0,
+                    "file_type": "unknown"
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error in _parse_json_response: {str(e)}")
+            return {
+                "total_issues": 0,
+                "issues": [],
+                "error": f"Failed to parse LLM response: {str(e)}",
+                "raw_response": content[:500] + "..." if len(content) > 500 else content,
+                "file_info": {
+                    "filename": "unknown",
+                    "total_lines": 0,
+                    "file_type": "unknown"
+                }
             }
 
     def get_supported_models(self) -> List[str]:
@@ -763,6 +904,7 @@ Return as JSON:
             return result
 
         except Exception as e:
+            logger.error(f"Error in fix_specific_issue: {str(e)}")
             return {
                 "error": str(e),
                 "fixed_code": code,
