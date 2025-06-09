@@ -21,6 +21,7 @@ from llm_clients import LLMClient
 from wcag_analyzer import WCAGAnalyzer
 from code_processor import CodeProcessor
 from report_generator import ReportGenerator
+from enhanced_remediation import EnhancedRemediationService
 
 from dotenv import load_dotenv
 
@@ -115,11 +116,13 @@ app.add_middleware(
 # Store for analysis sessions
 analysis_sessions = {}
 
+# Initialize enhanced remediation service
+enhanced_remediation = EnhancedRemediationService()
+
 
 class AnalysisRequest(BaseModel):
     session_id: str
     models: List[str]
-    # Removed analysis_type since we only do detection now
 
 
 class RemediationRequest(BaseModel):
@@ -127,6 +130,24 @@ class RemediationRequest(BaseModel):
     issue_id: str
     model: str
     file_path: str
+
+
+class PreviewRemediationRequest(BaseModel):
+    session_id: str
+    issue_id: str
+    model: str
+
+
+class ApplyRemediationRequest(BaseModel):
+    session_id: str
+    issue_id: str
+    model: str
+    force_apply: bool = False
+
+
+class RollbackRequest(BaseModel):
+    session_id: str
+    issue_id: str
 
 
 @app.post("/upload")
@@ -387,55 +408,199 @@ async def analyze_accessibility(request: AnalysisRequest):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
-@app.post("/remediate")
-async def remediate_issue(request: RemediationRequest):
-    """Fix a specific accessibility issue using selected LLM"""
-    logger.info(f"Starting remediation for issue {request.issue_id} with model {request.model}")
+@app.get("/debug/session/{session_id}")
+async def debug_session_structure(session_id: str):
+    """Debug endpoint to inspect session structure"""
+    if session_id not in analysis_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session = analysis_sessions[session_id]
+
+    debug_info = {
+        "session_keys": list(session.keys()),
+        "analysis_results_structure": {},
+        "issue_ids": [],
+        "files": []
+    }
+
+    # Analyze analysis_results structure
+    analysis_results = session.get('analysis_results', {})
+    for model, model_results in analysis_results.items():
+        debug_info["analysis_results_structure"][model] = {
+            "type": str(type(model_results)),
+            "length": len(model_results) if isinstance(model_results, list) else "N/A",
+            "sample_keys": []
+        }
+
+        if isinstance(model_results, list) and model_results:
+            first_result = model_results[0]
+            debug_info["analysis_results_structure"][model]["sample_keys"] = list(first_result.keys()) if isinstance(
+                first_result, dict) else []
+
+            # Extract issue IDs
+            for file_result in model_results:
+                if isinstance(file_result, dict):
+                    issues = file_result.get('issues', [])
+                    for issue in issues:
+                        if isinstance(issue, dict):
+                            issue_id = issue.get('issue_id', 'NO_ID')
+                            debug_info["issue_ids"].append({
+                                "model": model,
+                                "file": file_result.get('file_info', {}).get('name', 'Unknown'),
+                                "issue_id": issue_id,
+                                "wcag_guideline": issue.get('wcag_guideline', 'No guideline')
+                            })
+
+    # Analyze files structure
+    files = session.get('files', [])
+    for file_info in files:
+        debug_info["files"].append({
+            "name": file_info.get('name', 'Unknown'),
+            "path": file_info.get('path', 'No path'),
+            "size": file_info.get('size', 0)
+        })
+
+    return debug_info
+
+
+@app.post("/remediate/preview")
+async def preview_remediation(request: PreviewRemediationRequest):
+    """Preview the proposed remediation without applying it"""
+    logger.info(f"Generating remediation preview for issue {request.issue_id} with model {request.model}")
 
     if request.session_id not in analysis_sessions:
         logger.error(f"Session not found: {request.session_id}")
         raise HTTPException(status_code=404, detail="Session not found")
 
-    session = analysis_sessions[request.session_id]
-
     try:
-        # Find the specific file and issue
-        file_path = Path(request.file_path)
-        if not file_path.exists():
-            logger.error(f"File not found for remediation: {file_path}")
-            raise HTTPException(status_code=404, detail="File not found")
-
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-
-        llm_client = LLMClient()
-
-        # Get remediation from LLM
-        logger.info(f"Requesting remediation from {request.model}...")
-        remediation_result = await llm_client.fix_specific_issue(
-            content, request.issue_id, request.model
+        preview_result = await enhanced_remediation.preview_remediation(
+            request.session_id, request.issue_id, request.model, analysis_sessions
         )
-        log_success("Remediation completed")
 
-        # Store remediation result
-        if "remediations" not in session:
-            session["remediations"] = {}
-
-        session["remediations"][request.issue_id] = {
-            "model": request.model,
-            "result": remediation_result,
-            "timestamp": datetime.now().isoformat()
-        }
-
-        return {
-            "issue_id": request.issue_id,
-            "model": request.model,
-            "fixed_code": remediation_result.get("fixed_code", ""),
-            "changes": remediation_result.get("changes", [])
-        }
+        if preview_result.get("success"):
+            log_success("Remediation preview generated successfully")
+            return {
+                "success": True,
+                "preview": True,
+                "issue_id": request.issue_id,
+                "model": request.model,
+                **preview_result
+            }
+        else:
+            log_error(f"Preview generation failed: {preview_result.get('error', 'Unknown error')}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Preview generation failed: {preview_result.get('error', 'Unknown error')}"
+            )
 
     except Exception as e:
-        log_error(f"Remediation failed: {str(e)}")
+        log_error(f"Preview generation failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Preview generation failed: {str(e)}")
+
+
+@app.post("/remediate/apply")
+async def apply_remediation(request: ApplyRemediationRequest):
+    """Apply the remediation after validation"""
+    logger.info(f"Applying remediation for issue {request.issue_id} with model {request.model}")
+
+    if request.session_id not in analysis_sessions:
+        logger.error(f"Session not found: {request.session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        apply_result = await enhanced_remediation.apply_remediation(
+            request.session_id, request.issue_id, request.model,
+            analysis_sessions, request.force_apply
+        )
+
+        if apply_result.get("success"):
+            log_success("Remediation applied successfully")
+            return apply_result
+        else:
+            log_error(f"Remediation application failed: {apply_result.get('error', 'Unknown error')}")
+
+            # If it's a quality score issue, return a different status code
+            if "quality score" in apply_result.get("error", "").lower():
+                return JSONResponse(
+                    status_code=422,  # Unprocessable Entity
+                    content=apply_result
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Remediation application failed: {apply_result.get('error', 'Unknown error')}"
+                )
+
+    except Exception as e:
+        log_error(f"Remediation application failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Remediation application failed: {str(e)}")
+
+
+@app.post("/remediate/rollback")
+async def rollback_remediation(request: RollbackRequest):
+    """Rollback a previously applied remediation"""
+    logger.info(f"Rolling back remediation for issue {request.issue_id}")
+
+    if request.session_id not in analysis_sessions:
+        logger.error(f"Session not found: {request.session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        rollback_result = await enhanced_remediation.rollback_remediation(
+            request.session_id, request.issue_id, analysis_sessions
+        )
+
+        if rollback_result.get("success"):
+            log_success("Remediation rolled back successfully")
+            return rollback_result
+        else:
+            log_error(f"Rollback failed: {rollback_result.get('error', 'Unknown error')}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rollback failed: {rollback_result.get('error', 'Unknown error')}"
+            )
+
+    except Exception as e:
+        log_error(f"Rollback failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}")
+
+
+@app.post("/remediate")
+async def remediate_issue(request: RemediationRequest):
+    """Legacy remediation endpoint - now uses enhanced remediation"""
+    logger.info(f"Legacy remediation request for issue {request.issue_id} with model {request.model}")
+
+    if request.session_id not in analysis_sessions:
+        logger.error(f"Session not found: {request.session_id}")
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        # Use enhanced remediation but apply directly (for backward compatibility)
+        apply_result = await enhanced_remediation.apply_remediation(
+            request.session_id, request.issue_id, request.model,
+            analysis_sessions, force_apply=True  # Force apply for legacy endpoint
+        )
+
+        if apply_result.get("success"):
+            log_success("Legacy remediation completed")
+            return {
+                "issue_id": request.issue_id,
+                "model": request.model,
+                "fixed_code": apply_result.get("validation", {}).get("fixed_code", ""),
+                "changes": apply_result.get("changes_applied", [])
+            }
+        else:
+            log_error(f"Legacy remediation failed: {apply_result.get('error', 'Unknown error')}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Remediation failed: {apply_result.get('error', 'Unknown error')}"
+            )
+
+    except Exception as e:
+        log_error(f"Legacy remediation failed: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Remediation failed: {str(e)}")
 
@@ -503,7 +668,7 @@ async def download_fixed_code(session_id: str):
 
                 # Apply all fixes for this file
                 for issue_id, remediation in session["remediations"].items():
-                    if file_info["name"] in remediation["result"].get("file_path", ""):
+                    if remediation.get("applied") and file_info["name"] in remediation["result"].get("file_path", ""):
                         content = remediation["result"]["fixed_code"]
 
                 zipf.writestr(f"fixed/{file_info['name']}", content)
