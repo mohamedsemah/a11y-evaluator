@@ -9,7 +9,6 @@ function App() {
   const [analysisResults, setAnalysisResults] = useState({});
   const [loading, setLoading] = useState(false);
   const [selectedModels, setSelectedModels] = useState(['gpt-4o']);
-  const [analysisType, setAnalysisType] = useState('detection');
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [issueModalTab, setIssueModalTab] = useState('code');
@@ -64,7 +63,7 @@ function App() {
         body: JSON.stringify({
           session_id: sessionId,
           models: selectedModels,
-          analysis_type: analysisType
+          analysis_type: 'detection' // Always detection only
         }),
       });
 
@@ -78,7 +77,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, selectedModels, analysisType]);
+  }, [sessionId, selectedModels]);
 
   const handleRemediation = useCallback(async (issueId, model, filePath) => {
     if (!sessionId) return;
@@ -398,7 +397,7 @@ function App() {
                 Infotainment Accessibility Analyzer
               </h1>
               <p className="text-gray-600 mt-1">
-                Detect and fix WCAG 2.2 compliance issues using multiple LLMs
+                Detect WCAG 2.2 compliance issues using multiple LLMs
               </p>
             </div>
           </div>
@@ -406,16 +405,16 @@ function App() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Full Width Configuration Panel */}
+        {/* Configuration Panel */}
         <div className="bg-white rounded-lg shadow p-8">
           <h2 className="text-2xl font-semibold mb-8 flex items-center gap-3">
             <Settings size={28} />
-            Upload Files to Assess
+            Upload Files and Configure Analysis
           </h2>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* File Upload Section */}
-            <div className="lg:col-span-1">
+            <div>
               <h3 className="text-lg font-medium text-gray-900 mb-4">Upload Files</h3>
               <input
                 ref={fileInputRef}
@@ -458,10 +457,10 @@ function App() {
               )}
             </div>
 
-            {/* Model Selection Section */}
-            <div className="lg:col-span-1">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">LLM Models</h3>
-              <div className="space-y-4">
+            {/* Model Selection and Analysis Section */}
+            <div>
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Select LLM Models for Analysis</h3>
+              <div className="space-y-4 mb-6">
                 {availableModels.map(model => (
                   <label key={model.id} className="flex items-start gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
                     <input
@@ -483,52 +482,25 @@ function App() {
                   </label>
                 ))}
               </div>
-            </div>
 
-            {/* Analysis Configuration Section */}
-            <div className="lg:col-span-1">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Analysis Configuration</h3>
-
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Analysis Type
-                  </label>
-                  <select
-                    value={analysisType}
-                    onChange={(e) => setAnalysisType(e.target.value)}
-                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="detection">Issue Detection Only</option>
-                    <option value="remediation">Detection + Automatic Fixing</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {analysisType === 'detection'
-                      ? 'Identify accessibility issues without applying fixes'
-                      : 'Identify issues and generate fixed code automatically'
-                    }
-                  </p>
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+                <h4 className="font-medium text-blue-900 mb-2">Analysis Configuration</h4>
+                <div className="text-sm text-blue-800 space-y-1">
+                  <div>Files: {files.length} uploaded</div>
+                  <div>Models: {selectedModels.length} selected</div>
+                  <div>Mode: Detection only (fix issues individually after analysis)</div>
                 </div>
-
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <h4 className="font-medium text-blue-900 mb-2">Selected Configuration</h4>
-                  <div className="text-sm text-blue-800 space-y-1">
-                    <div>Files: {files.length} uploaded</div>
-                    <div>Models: {selectedModels.length} selected</div>
-                    <div>Type: {analysisType}</div>
-                  </div>
-                </div>
-
-                {/* Start Analysis Button */}
-                <button
-                  onClick={handleAnalysis}
-                  disabled={!sessionId || selectedModels.length === 0 || loading}
-                  className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-lg font-medium transition-colors"
-                >
-                  <Play size={24} />
-                  {loading ? 'Analyzing...' : 'Start Analysis'}
-                </button>
               </div>
+
+              {/* Start Analysis Button */}
+              <button
+                onClick={handleAnalysis}
+                disabled={!sessionId || selectedModels.length === 0 || loading}
+                className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-lg font-medium transition-colors"
+              >
+                <Play size={24} />
+                {loading ? 'Analyzing for WCAG 2.2 Compliance...' : 'Start Accessibility Analysis'}
+              </button>
             </div>
           </div>
         </div>

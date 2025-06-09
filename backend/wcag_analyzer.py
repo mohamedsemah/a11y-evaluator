@@ -97,8 +97,12 @@ class WCAGAnalyzer:
                 print(f"Rejected invalid issue: {issue.get('issue_id', 'Unknown')}")
 
         # Add static analysis results
-        static_issues = self._perform_static_analysis(original_code, file_info)
-        enhanced_issues.extend(static_issues)
+        try:
+            static_issues = self._perform_static_analysis(original_code, file_info)
+            enhanced_issues.extend(static_issues)
+        except Exception as e:
+            print(f"Static analysis failed: {str(e)}")
+            # Continue without static analysis
 
         # Calculate metrics
         metrics = self._calculate_metrics(enhanced_issues)
@@ -282,394 +286,138 @@ class WCAGAnalyzer:
             if guideline_num in search_patterns:
                 matching_lines = []
                 for i, line in enumerate(lines, 1):
-                    for pattern in search_patterns[guideline_num]:
-                        if re.search(pattern, line, re.IGNORECASE):
-                            matching_lines.append(i)
-                            break
-                return matching_lines
-
-        return []
-
-    def _extract_keywords_from_issue(self, issue: Dict[str, Any]) -> List[str]:
-        """Extract relevant keywords from issue description"""
-        description = issue.get('description', '').lower()
-        code_snippet = issue.get('code_snippet', '').lower()
-
-        # Common HTML/CSS/JS keywords to look for
-        keywords = []
-
-        # Extract HTML tags
-        html_tags = re.findall(r'<(\w+)', code_snippet)
-        keywords.extend(html_tags)
-
-        # Extract attribute names
-        attributes = re.findall(r'(\w+)\s*=', code_snippet)
-        keywords.extend(attributes)
-
-        # Extract keywords from description
-        keyword_patterns = [
-            r'\b(alt|src|href|role|aria-\w+|tabindex|onclick|onkeydown)\b',
-            r'\b(button|input|img|label|select|textarea)\b',
-            r'\b(focus|hover|active|visited)\b'
-        ]
-
-        for pattern in keyword_patterns:
-            matches = re.findall(pattern, description)
-            keywords.extend(matches)
-
-        return list(set(keywords))  # Remove duplicates
-
-    def _extract_accurate_code_context(self, code: str, line_numbers: List[int]) -> Dict[str, Any]:
-        """Extract code context with improved accuracy"""
-        lines = code.split('\n')
-
-        if not line_numbers:
-            return {"lines": [], "start_line": 0, "end_line": 0}
-
-        # Expand context window based on code complexity
-        context_window = 3  # Default context
-        min_line = max(0, min(line_numbers) - context_window)
-        max_line = min(len(lines), max(line_numbers) + context_window)
-
-        context_lines = []
-        for i in range(min_line, max_line):
-            is_highlighted = (i + 1) in line_numbers
-            line_content = lines[i] if i < len(lines) else ""
-
-            context_lines.append({
-                "number": i + 1,
-                "content": line_content,
-                "highlighted": is_highlighted,
-                "indentation": len(line_content) - len(line_content.lstrip()),
-                "is_empty": not line_content.strip()
-            })
-
-        return {
-            "lines": context_lines,
-            "start_line": min_line + 1,
-            "end_line": max_line,
-            "highlighted_lines": line_numbers
-        }
-
-    def _extract_precise_code_snippet(self, code: str, line_numbers: List[int],
-                                      original_snippet: str) -> str:
-        """Extract precise code snippet from validated line numbers"""
-        lines = code.split('\n')
-
-        if not line_numbers:
-            return original_snippet
-
-        # Get the actual lines
-        actual_lines = []
-        for line_num in line_numbers:
-            if 1 <= line_num <= len(lines):
-                actual_lines.append(lines[line_num - 1])
-
-        if actual_lines:
-            # If we have multiple lines, join them intelligently
-            if len(actual_lines) == 1:
-                return actual_lines[0].strip()
-            else:
-                # For multiple lines, preserve important structure
-                return '\n'.join(line.rstrip() for line in actual_lines)
-
-        return original_snippet
-
-    def _calculate_validation_score(self, issue: Dict[str, Any], original_code: str) -> float:
-        """Calculate a validation score for the issue"""
-        score = 0.0
-
-        # Line number accuracy (40% of score)
-        line_numbers = issue.get('line_numbers', [])
-        if line_numbers:
-            lines = original_code.split('\n')
-            valid_lines = sum(1 for ln in line_numbers if 1 <= ln <= len(lines))
-            score += 0.4 * (valid_lines / len(line_numbers))
-
-        # Code snippet relevance (30% of score)
-        code_snippet = issue.get('code_snippet', '')
-        if code_snippet and line_numbers:
-            if any(code_snippet.strip() in original_code.split('\n')[ln - 1]
-                   for ln in line_numbers if 1 <= ln <= len(original_code.split('\n'))):
-                score += 0.3
-
-        # WCAG guideline specificity (20% of score)
-        wcag_guideline = issue.get('wcag_guideline', '')
-        if re.match(r'\d+\.\d+\.\d+', wcag_guideline):
-            score += 0.2
-
-        # Description quality (10% of score)
-        description = issue.get('description', '')
-        if len(description) > 20 and any(keyword in description.lower()
-                                         for keyword in
-                                         ['accessibility', 'wcag', 'screen reader', 'keyboard', 'focus']):
-            score += 0.1
-
-        return min(score, 1.0)
-
-    def _perform_static_analysis(self, code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Enhanced static analysis with precise line detection"""
-        issues = []
-        file_type = self._determine_file_type(file_info["name"])
-
-        if file_type == "html":
-            issues.extend(self._analyze_html_enhanced(code, file_info))
-        elif file_type == "css":
-            issues.extend(self._analyze_css_enhanced(code, file_info))
-        elif file_type == "xml":
-            issues.extend(self._analyze_xml_enhanced(code, file_info))
-        elif file_type in ["jsx", "tsx", "javascript"]:
-            issues.extend(self._analyze_react_enhanced(code, file_info))
-
-        return issues
-
-    def _analyze_html_enhanced(self, html_code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Enhanced HTML analysis with precise line detection"""
-        issues = []
-        lines = html_code.split('\n')
-
-        try:
-            soup = BeautifulSoup(html_code, 'html.parser')
-
-            # Check for missing alt attributes with precise line detection
-            images = soup.find_all('img')
-            for i, img in enumerate(images):
-                if not img.get('alt'):
-                    # Find exact line number
-                    img_line = self._find_element_line_precise(html_code, str(img))
-                    issues.append({
-                        "issue_id": f"STATIC_1_1_1_{i:03d}",
-                        "wcag_guideline": "1.1.1 Non-text Content",
-                        "severity": "A",
-                        "description": f"Image element missing alt attribute on line {img_line}",
-                        "line_numbers": [img_line],
-                        "code_snippet": str(img),
-                        "recommendation": "Add descriptive alt attribute: alt='description of image content'",
-                        "category": "perceivable",
-                        "source": "static_analysis",
-                        "infotainment_risk": "high" if any(keyword in str(img).lower()
-                                                           for keyword in ['icon', 'button', 'control']) else "medium",
-                        "driver_safety_impact": "moderate"
-                    })
-
-            # Check for missing form labels with enhanced detection
-            inputs = soup.find_all('input')
-            for i, input_elem in enumerate(inputs):
-                input_type = input_elem.get('type', 'text').lower()
-                if input_type not in ['hidden', 'submit', 'button']:
-                    has_label = (input_elem.get('aria-label') or
-                                 input_elem.get('aria-labelledby') or
-                                 input_elem.get('title'))
-
-                    # Check for associated label element
-                    input_id = input_elem.get('id')
-                    if input_id:
-                        associated_label = soup.find('label', {'for': input_id})
-                        if associated_label:
-                            has_label = True
-
-                    if not has_label:
-                        input_line = self._find_element_line_precise(html_code, str(input_elem))
-                        issues.append({
-                            "issue_id": f"STATIC_3_3_2_{i:03d}",
-                            "wcag_guideline": "3.3.2 Labels or Instructions",
-                            "severity": "A",
-                            "description": f"Form input missing accessible label on line {input_line}",
-                            "line_numbers": [input_line],
-                            "code_snippet": str(input_elem),
-                            "recommendation": "Add label: <label for='inputId'>Label text</label> or aria-label='Label text'",
-                            "category": "understandable",
-                            "source": "static_analysis",
-                            "infotainment_risk": "high",
-                            "driver_safety_impact": "critical"
-                        })
-
-            # Check for missing focus styles
-            if not re.search(r':focus\s*{[^}]*outline\s*:[^}]*}', html_code, re.IGNORECASE):
-                issues.append({
-                    "issue_id": "STATIC_2_4_7_001",
-                    "wcag_guideline": "2.4.7 Focus Visible",
-                    "severity": "AA",
-                    "description": "No visible focus indicators found in document",
-                    "line_numbers": [1],
-                    "code_snippet": "<!-- Add focus styles for interactive elements -->",
-                    "recommendation": "Add CSS focus styles: button:focus { outline: 2px solid #0066cc; }",
-                    "category": "operable",
-                    "source": "static_analysis",
-                    "infotainment_risk": "critical",
-                    "driver_safety_impact": "critical"
-                })
-
-            # Check for keyboard event handlers
-            interactive_elements = soup.find_all(['button', 'a', 'input'])
-            for elem in interactive_elements:
-                if elem.get('onclick') and not (elem.get('onkeydown') or elem.get('onkeypress')):
-                    elem_line = self._find_element_line_precise(html_code, str(elem))
-                    issues.append({
-                        "issue_id": f"STATIC_2_1_1_KEYBOARD_{elem.name}_{elem_line}",
-                        "wcag_guideline": "2.1.1 Keyboard",
-                        "severity": "A",
-                        "description": f"Interactive element with onclick but no keyboard support on line {elem_line}",
-                        "line_numbers": [elem_line],
-                        "code_snippet": str(elem),
-                        "recommendation": "Add keyboard event handler: onkeydown='if(event.key===\"Enter\"||event.key===\" \")clickHandler()'",
-                        "category": "operable",
-                        "source": "static_analysis",
-                        "infotainment_risk": "critical",
-                        "driver_safety_impact": "critical"
-                    })
-
-        except Exception as e:
-            issues.append({
-                "issue_id": "STATIC_4_1_1_001",
-                "wcag_guideline": "4.1.1 Parsing",
-                "severity": "A",
-                "description": f"HTML parsing error: {str(e)}",
-                "line_numbers": [1],
-                "code_snippet": "<!-- HTML parsing failed -->",
-                "recommendation": "Fix HTML syntax errors",
-                "category": "robust",
-                "source": "static_analysis",
-                "infotainment_risk": "high",
-                "driver_safety_impact": "moderate"
-            })
-
-        return issues
-
-    def _find_element_line_precise(self, html_code: str, element_str: str) -> int:
-        """Find precise line number of HTML element using multiple strategies"""
-        lines = html_code.split('\n')
-
-        # Strategy 1: Exact match
-        for i, line in enumerate(lines, 1):
-            if element_str.strip() in line:
-                return i
-
-        # Strategy 2: Parse element and look for key attributes
-        try:
-            soup = BeautifulSoup(element_str, 'html.parser')
-            element = soup.find()
-            if element:
-                tag_name = element.name
-
-                # Look for opening tag with attributes
-                attributes = []
-                for attr, value in element.attrs.items():
-                    if isinstance(value, list):
-                        value = ' '.join(value)
-                    attributes.append(f'{attr}="{value}"')
-
-                # Create search patterns
-                patterns = [
-                    f'<{tag_name}\\b[^>]*>',  # Any opening tag
-                    f'<{tag_name}\\s+'  # Tag with space (likely has attributes)
-                ]
-
-                # Add attribute-specific patterns
-                for attr in attributes:
-                    patterns.append(re.escape(attr))
-
-                for i, line in enumerate(lines, 1):
                     for pattern in patterns:
                         if re.search(pattern, line, re.IGNORECASE):
                             return i
         except:
-            pass
+        pass
 
-        # Strategy 3: Look for tag name
-        try:
-            soup = BeautifulSoup(element_str, 'html.parser')
-            element = soup.find()
-            if element:
-                tag_name = element.name
-                for i, line in enumerate(lines, 1):
-                    if f'<{tag_name}' in line.lower():
-                        return i
-        except:
-            pass
+    # Strategy 3: Look for tag name
+    try:
+        soup = BeautifulSoup(element_str, 'html.parser')
+        element = soup.find()
+        if element:
+            tag_name = element.name
+            for i, line in enumerate(lines, 1):
+                if f'<{tag_name}' in line.lower():
+                    return i
+    except:
+        pass
 
-        return 1  # Fallback
+    return 1  # Fallback
 
-    def _analyze_css_enhanced(self, css_code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Enhanced CSS analysis"""
-        issues = []
-        lines = css_code.split('\n')
 
-        # Check for focus indicators
-        focus_selectors = re.findall(r'[^{]*:focus[^{]*{[^}]*}', css_code, re.IGNORECASE | re.DOTALL)
+def _analyze_css_enhanced(self, css_code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Enhanced CSS analysis"""
+    issues = []
+    lines = css_code.split('\n')
 
-        if not focus_selectors:
-            issues.append({
-                "issue_id": "STATIC_2_4_7_CSS_001",
-                "wcag_guideline": "2.4.7 Focus Visible",
-                "severity": "AA",
-                "description": "No focus styles defined in CSS",
-                "line_numbers": [1],
-                "code_snippet": "/* No :focus styles found */",
-                "recommendation": "Add focus styles: button:focus, a:focus { outline: 2px solid #0066cc; outline-offset: 2px; }",
-                "category": "operable",
-                "source": "static_analysis",
-                "infotainment_risk": "critical",
-                "driver_safety_impact": "critical"
-            })
+    # Check for focus indicators
+    focus_selectors = re.findall(r'[^{]*:focus[^{]*{[^}]*}', css_code, re.IGNORECASE | re.DOTALL)
 
-        # Check for insufficient color contrast (basic pattern detection)
-        color_pairs = self._find_color_contrast_issues(css_code)
-        for i, (selector, issue_line) in enumerate(color_pairs):
-            issues.append({
-                "issue_id": f"STATIC_1_4_3_CSS_{i:03d}",
-                "wcag_guideline": "1.4.3 Contrast (Minimum)",
-                "severity": "AA",
-                "description": f"Potential color contrast issue in selector '{selector}' on line {issue_line}",
-                "line_numbers": [issue_line],
-                "code_snippet": lines[issue_line - 1] if issue_line <= len(lines) else "",
-                "recommendation": "Ensure color contrast ratio is at least 4.5:1 for normal text, 3:1 for large text",
-                "category": "perceivable",
-                "source": "static_analysis",
-                "infotainment_risk": "high",
-                "driver_safety_impact": "moderate"
-            })
+    if not focus_selectors:
+        issues.append({
+            "issue_id": "STATIC_2_4_7_CSS_001",
+            "wcag_guideline": "2.4.7 Focus Visible",
+            "severity": "AA",
+            "description": "No focus styles defined in CSS",
+            "line_numbers": [1],
+            "code_snippet": "/* No :focus styles found */",
+            "recommendation": "Add focus styles: button:focus, a:focus { outline: 2px solid #0066cc; outline-offset: 2px; }",
+            "category": "operable",
+            "source": "static_analysis",
+            "infotainment_risk": "critical",
+            "driver_safety_impact": "critical"
+        })
 
-        return issues
+    # Check for insufficient color contrast (basic pattern detection)
+    color_pairs = self._find_color_contrast_issues(css_code)
+    for i, (selector, issue_line) in enumerate(color_pairs):
+        issues.append({
+            "issue_id": f"STATIC_1_4_3_CSS_{i:03d}",
+            "wcag_guideline": "1.4.3 Contrast (Minimum)",
+            "severity": "AA",
+            "description": f"Potential color contrast issue in selector '{selector}' on line {issue_line}",
+            "line_numbers": [issue_line],
+            "code_snippet": lines[issue_line - 1] if issue_line <= len(lines) else "",
+            "recommendation": "Ensure color contrast ratio is at least 4.5:1 for normal text, 3:1 for large text",
+            "category": "perceivable",
+            "source": "static_analysis",
+            "infotainment_risk": "high",
+            "driver_safety_impact": "moderate"
+        })
 
-    def _find_color_contrast_issues(self, css_code: str) -> List[Tuple[str, int]]:
-        """Find potential color contrast issues in CSS"""
-        lines = css_code.split('\n')
-        issues = []
+    return issues
 
-        # Look for common problematic color combinations
-        problematic_patterns = [
-            (r'color\s*:\s*#?(?:white|#fff|#ffffff)', r'background(?:-color)?\s*:\s*#?(?:yellow|#ff0|#ffff00)'),
-            (r'color\s*:\s*#?(?:gray|grey|#808080)', r'background(?:-color)?\s*:\s*#?(?:white|#fff|#ffffff)'),
-            (r'color\s*:\s*#?(?:light|#ccc|#cccccc)', r'background(?:-color)?\s*:\s*#?(?:white|#fff|#ffffff)')
-        ]
 
-        current_selector = ""
-        for i, line in enumerate(lines, 1):
-            # Track current selector
-            if '{' in line and not line.strip().startswith('/*'):
-                current_selector = line.split('{')[0].strip()
+def _find_color_contrast_issues(self, css_code: str) -> List[Tuple[str, int]]:
+    """Find potential color contrast issues in CSS"""
+    lines = css_code.split('\n')
+    issues = []
 
-            # Check for problematic color combinations
-            for color_pattern, bg_pattern in problematic_patterns:
-                if (re.search(color_pattern, line, re.IGNORECASE) and
-                        re.search(bg_pattern, line, re.IGNORECASE)):
-                    issues.append((current_selector, i))
-                    break
+    # Look for common problematic color combinations
+    problematic_patterns = [
+        (r'color\s*:\s*#?(?:white|#fff|#ffffff)', r'background(?:-color)?\s*:\s*#?(?:yellow|#ff0|#ffff00)'),
+        (r'color\s*:\s*#?(?:gray|grey|#808080)', r'background(?:-color)?\s*:\s*#?(?:white|#fff|#ffffff)'),
+        (r'color\s*:\s*#?(?:light|#ccc|#cccccc)', r'background(?:-color)?\s*:\s*#?(?:white|#fff|#ffffff)')
+    ]
 
-        return issues
+    current_selector = ""
+    for i, line in enumerate(lines, 1):
+        # Track current selector
+        if '{' in line and not line.strip().startswith('/*'):
+            current_selector = line.split('{')[0].strip()
 
-    def _analyze_react_enhanced(self, code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Enhanced React/JSX analysis"""
-        issues = []
-        lines = code.split('\n')
+        # Check for problematic color combinations
+        for color_pattern, bg_pattern in problematic_patterns:
+            if (re.search(color_pattern, line, re.IGNORECASE) and
+                    re.search(bg_pattern, line, re.IGNORECASE)):
+                issues.append((current_selector, i))
+                break
 
-        # Check for missing key props in map operations
-        map_pattern = r'\.map\s*\(\s*[^)]*\)\s*=>\s*[^}]*<[^>]*(?<!key\s*=)[^>]*>'
-        for match in re.finditer(map_pattern, code, re.MULTILINE | re.DOTALL):
+    return issues
+
+
+def _analyze_xml_enhanced(self, xml_code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Enhanced XML analysis for Android layouts"""
+    issues = []
+
+    try:
+        # Basic XML validation
+        ET.fromstring(xml_code)
+    except ET.ParseError as e:
+        issues.append({
+            "issue_id": "STATIC_XML_PARSE_001",
+            "wcag_guideline": "4.1.1 Parsing",
+            "severity": "A",
+            "description": f"XML parsing error: {str(e)}",
+            "line_numbers": [1],
+            "code_snippet": "<!-- XML parsing failed -->",
+            "recommendation": "Fix XML syntax errors",
+            "category": "robust",
+            "source": "static_analysis",
+            "infotainment_risk": "high",
+            "driver_safety_impact": "moderate"
+        })
+
+    return issues
+
+
+def _analyze_react_enhanced(self, code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Enhanced React/JSX analysis with fixed regex patterns"""
+    issues = []
+    lines = code.split('\n')
+
+    try:
+        # Fixed pattern: Check for missing key props in map operations
+        # Using a simpler approach that doesn't rely on problematic lookbehind
+        map_matches = re.finditer(r'\.map\s*\(\s*[^)]*\)\s*=>\s*[^}]*<[^>]*>', code, re.MULTILINE | re.DOTALL)
+
+        for match in map_matches:
             line_num = code[:match.start()].count('\n') + 1
             context = code[match.start():match.end()]
 
+            # Check if 'key=' is NOT present in the context
             if 'key=' not in context:
                 issues.append({
                     "issue_id": f"STATIC_REACT_KEY_{line_num}",
@@ -689,7 +437,7 @@ class WCAGAnalyzer:
         onclick_pattern = r'onClick\s*=\s*{[^}]*}'
         for match in re.finditer(onclick_pattern, code):
             line_num = code[:match.start()].count('\n') + 1
-            line_content = lines[line_num - 1]
+            line_content = lines[line_num - 1] if line_num <= len(lines) else ""
 
             if 'onKeyDown' not in line_content and 'onKeyPress' not in line_content:
                 issues.append({
@@ -706,206 +454,219 @@ class WCAGAnalyzer:
                     "driver_safety_impact": "critical"
                 })
 
-        return issues
+    except Exception as e:
+        print(f"React analysis error: {str(e)}")
+        # Continue without React-specific analysis
 
-    def _calculate_metrics(self, issues: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate enhanced accessibility metrics"""
-        total_issues = len(issues)
+    return issues
 
-        if total_issues == 0:
+
+def _calculate_metrics(self, issues: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate enhanced accessibility metrics"""
+    total_issues = len(issues)
+
+    if total_issues == 0:
+        return {
+            "total_issues": 0,
+            "severity_breakdown": {"A": 0, "AA": 0, "AAA": 0},
+            "category_breakdown": {"perceivable": 0, "operable": 0, "understandable": 0, "robust": 0},
+            "infotainment_risk_breakdown": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+            "driver_safety_breakdown": {"none": 0, "minor": 0, "moderate": 0, "critical": 0},
+            "compliance_score": 100,
+            "validation_quality": 1.0
+        }
+
+    severity_counts = {"A": 0, "AA": 0, "AAA": 0}
+    category_counts = {"perceivable": 0, "operable": 0, "understandable": 0, "robust": 0}
+    infotainment_risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+    driver_safety_counts = {"none": 0, "minor": 0, "moderate": 0, "critical": 0}
+
+    validation_scores = []
+
+    for issue in issues:
+        severity = issue.get("severity", "A")
+        category = issue.get("category", "unknown")
+        infotainment_risk = issue.get("infotainment_risk", "medium")
+        driver_safety = issue.get("driver_safety_impact", "minor")
+        validation_score = issue.get("validation_score", 0.5)
+
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+        if category in category_counts:
+            category_counts[category] += 1
+        if infotainment_risk in infotainment_risk_counts:
+            infotainment_risk_counts[infotainment_risk] += 1
+        if driver_safety in driver_safety_counts:
+            driver_safety_counts[driver_safety] += 1
+
+        validation_scores.append(validation_score)
+
+    # Calculate compliance score with infotainment weighting
+    critical_issues = severity_counts["A"] + severity_counts["AA"]
+    safety_critical = driver_safety_counts.get("critical", 0)
+    compliance_score = max(0, 100 - (critical_issues * 5) - (safety_critical * 10))
+
+    # Calculate average validation quality
+    avg_validation = sum(validation_scores) / len(validation_scores) if validation_scores else 1.0
+
+    return {
+        "total_issues": total_issues,
+        "severity_breakdown": severity_counts,
+        "category_breakdown": category_counts,
+        "infotainment_risk_breakdown": infotainment_risk_counts,
+        "driver_safety_breakdown": driver_safety_counts,
+        "compliance_score": compliance_score,
+        "validation_quality": avg_validation
+    }
+
+
+def _determine_file_type(self, filename: str) -> str:
+    """Determine file type from filename"""
+    ext = Path(filename).suffix.lower()
+
+    type_map = {
+        '.html': 'html', '.htm': 'html',
+        '.css': 'css',
+        '.xml': 'xml',
+        '.jsx': 'jsx', '.tsx': 'tsx',
+        '.js': 'javascript', '.ts': 'typescript',
+        '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp',
+        '.c': 'c', '.h': 'c'
+    }
+
+    return type_map.get(ext, 'unknown')
+
+
+def _extract_guideline_id(self, guideline_text: str) -> str:
+    """Extract WCAG guideline ID from text"""
+    match = re.search(r'(\d+\.\d+\.\d+)', guideline_text)
+    return match.group(1) if match else ""
+
+
+def _analyze_infotainment_context(self, code_snippet: str, file_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Analyze infotainment-specific context"""
+    context = {
+        "patterns_found": [],
+        "infotainment_relevance": "low",
+        "driver_distraction_risk": "low",
+        "safety_critical_functions": []
+    }
+
+    # Check for infotainment patterns
+    for pattern_name, pattern in self.infotainment_patterns.items():
+        if re.search(pattern, code_snippet, re.IGNORECASE):
+            context["patterns_found"].append(pattern_name)
+
+    # Check for safety-critical functions
+    safety_patterns = [
+        r'emergency|911|sos',
+        r'navigation|gps|route',
+        r'phone|call|dial',
+        r'media|music|radio',
+        r'climate|hvac|temperature'
+    ]
+
+    for pattern in safety_patterns:
+        if re.search(pattern, code_snippet, re.IGNORECASE):
+            context["safety_critical_functions"].append(pattern)
+
+    # Assess relevance and risk
+    if len(context["patterns_found"]) > 0:
+        context["infotainment_relevance"] = "high"
+
+        if any(p in context["patterns_found"] for p in ["media_controls", "navigation"]):
+            context["driver_distraction_risk"] = "high"
+        elif any(p in context["patterns_found"] for p in ["touch_targets", "interactive"]):
+            context["driver_distraction_risk"] = "medium"
+
+    return context
+
+
+def _generate_ui_preview(self, issue: Dict[str, Any], file_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate enhanced UI preview data"""
+    return {
+        "element_type": self._extract_element_type(issue.get("code_snippet", "")),
+        "bounding_box": self._estimate_bounding_box(issue),
+        "preview_html": self._generate_preview_html(issue, file_info),
+        "annotations": self._generate_annotations(issue),
+        "accessibility_tree": self._generate_accessibility_tree(issue)
+    }
+
+
+def _generate_accessibility_tree(self, issue: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate accessibility tree representation"""
+    code_snippet = issue.get("code_snippet", "")
+
+    try:
+        soup = BeautifulSoup(code_snippet, 'html.parser')
+        element = soup.find()
+
+        if element:
             return {
-                "total_issues": 0,
-                "severity_breakdown": {"A": 0, "AA": 0, "AAA": 0},
-                "category_breakdown": {"perceivable": 0, "operable": 0, "understandable": 0, "robust": 0},
-                "infotainment_risk_breakdown": {"low": 0, "medium": 0, "high": 0, "critical": 0},
-                "driver_safety_breakdown": {"none": 0, "minor": 0, "moderate": 0, "critical": 0},
-                "compliance_score": 100,
-                "validation_quality": 1.0
-            }
-
-        severity_counts = {"A": 0, "AA": 0, "AAA": 0}
-        category_counts = {"perceivable": 0, "operable": 0, "understandable": 0, "robust": 0}
-        infotainment_risk_counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
-        driver_safety_counts = {"none": 0, "minor": 0, "moderate": 0, "critical": 0}
-
-        validation_scores = []
-
-        for issue in issues:
-            severity = issue.get("severity", "A")
-            category = issue.get("category", "unknown")
-            infotainment_risk = issue.get("infotainment_risk", "medium")
-            driver_safety = issue.get("driver_safety_impact", "minor")
-            validation_score = issue.get("validation_score", 0.5)
-
-            if severity in severity_counts:
-                severity_counts[severity] += 1
-            if category in category_counts:
-                category_counts[category] += 1
-            if infotainment_risk in infotainment_risk_counts:
-                infotainment_risk_counts[infotainment_risk] += 1
-            if driver_safety in driver_safety_counts:
-                driver_safety_counts[driver_safety] += 1
-
-            validation_scores.append(validation_score)
-
-        # Calculate compliance score with infotainment weighting
-        critical_issues = severity_counts["A"] + severity_counts["AA"]
-        safety_critical = driver_safety_counts.get("critical", 0)
-        compliance_score = max(0, 100 - (critical_issues * 5) - (safety_critical * 10))
-
-        # Calculate average validation quality
-        avg_validation = sum(validation_scores) / len(validation_scores) if validation_scores else 1.0
-
-        return {
-            "total_issues": total_issues,
-            "severity_breakdown": severity_counts,
-            "category_breakdown": category_counts,
-            "infotainment_risk_breakdown": infotainment_risk_counts,
-            "driver_safety_breakdown": driver_safety_counts,
-            "compliance_score": compliance_score,
-            "validation_quality": avg_validation
-        }
-
-    def _determine_file_type(self, filename: str) -> str:
-        """Determine file type from filename"""
-        ext = Path(filename).suffix.lower()
-
-        type_map = {
-            '.html': 'html', '.htm': 'html',
-            '.css': 'css',
-            '.xml': 'xml',
-            '.jsx': 'jsx', '.tsx': 'tsx',
-            '.js': 'javascript', '.ts': 'typescript',
-            '.cpp': 'cpp', '.cc': 'cpp', '.cxx': 'cpp',
-            '.c': 'c', '.h': 'c'
-        }
-
-        return type_map.get(ext, 'unknown')
-
-    def _extract_guideline_id(self, guideline_text: str) -> str:
-        """Extract WCAG guideline ID from text"""
-        match = re.search(r'(\d+\.\d+\.\d+)', guideline_text)
-        return match.group(1) if match else ""
-
-    def _analyze_infotainment_context(self, code_snippet: str, file_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze infotainment-specific context"""
-        context = {
-            "patterns_found": [],
-            "infotainment_relevance": "low",
-            "driver_distraction_risk": "low",
-            "safety_critical_functions": []
-        }
-
-        # Check for infotainment patterns
-        for pattern_name, pattern in self.infotainment_patterns.items():
-            if re.search(pattern, code_snippet, re.IGNORECASE):
-                context["patterns_found"].append(pattern_name)
-
-        # Check for safety-critical functions
-        safety_patterns = [
-            r'emergency|911|sos',
-            r'navigation|gps|route',
-            r'phone|call|dial',
-            r'media|music|radio',
-            r'climate|hvac|temperature'
-        ]
-
-        for pattern in safety_patterns:
-            if re.search(pattern, code_snippet, re.IGNORECASE):
-                context["safety_critical_functions"].append(pattern)
-
-        # Assess relevance and risk
-        if len(context["patterns_found"]) > 0:
-            context["infotainment_relevance"] = "high"
-
-            if any(p in context["patterns_found"] for p in ["media_controls", "navigation"]):
-                context["driver_distraction_risk"] = "high"
-            elif any(p in context["patterns_found"] for p in ["touch_targets", "interactive"]):
-                context["driver_distraction_risk"] = "medium"
-
-        return context
-
-    def _generate_ui_preview(self, issue: Dict[str, Any], file_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate enhanced UI preview data"""
-        return {
-            "element_type": self._extract_element_type(issue.get("code_snippet", "")),
-            "bounding_box": self._estimate_bounding_box(issue),
-            "preview_html": self._generate_preview_html(issue, file_info),
-            "annotations": self._generate_annotations(issue),
-            "accessibility_tree": self._generate_accessibility_tree(issue)
-        }
-
-    def _generate_accessibility_tree(self, issue: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate accessibility tree representation"""
-        code_snippet = issue.get("code_snippet", "")
-
-        try:
-            soup = BeautifulSoup(code_snippet, 'html.parser')
-            element = soup.find()
-
-            if element:
-                return {
-                    "role": element.get('role', element.name),
-                    "name": (element.get('aria-label') or
-                             element.get('alt') or
-                             element.get_text(strip=True) or
-                             "Unnamed element"),
-                    "description": element.get('aria-describedby', ''),
-                    "state": {
-                        "focused": False,
-                        "expanded": element.get('aria-expanded') == 'true',
-                        "selected": element.get('aria-selected') == 'true'
-                    }
+                "role": element.get('role', element.name),
+                "name": (element.get('aria-label') or
+                         element.get('alt') or
+                         element.get_text(strip=True) or
+                         "Unnamed element"),
+                "description": element.get('aria-describedby', ''),
+                "state": {
+                    "focused": False,
+                    "expanded": element.get('aria-expanded') == 'true',
+                    "selected": element.get('aria-selected') == 'true'
                 }
-        except:
-            pass
+            }
+    except:
+        pass
 
-        return {"role": "unknown", "name": "Could not parse element", "description": "", "state": {}}
+    return {"role": "unknown", "name": "Could not parse element", "description": "", "state": {}}
 
-    def _extract_element_type(self, code_snippet: str) -> str:
-        """Extract element type from code snippet"""
-        # Enhanced element type detection
-        patterns = [
-            (r'<(button|input|a|img|select|textarea|label)\b', lambda m: m.group(1)),
-            (r'role\s*=\s*["\']([^"\']+)["\']', lambda m: m.group(1)),
-            (r'<(\w+)', lambda m: m.group(1))
-        ]
 
-        for pattern, extractor in patterns:
-            match = re.search(pattern, code_snippet, re.IGNORECASE)
-            if match:
-                return extractor(match)
+def _extract_element_type(self, code_snippet: str) -> str:
+    """Extract element type from code snippet"""
+    # Enhanced element type detection
+    patterns = [
+        (r'<(button|input|a|img|select|textarea|label)\b', lambda m: m.group(1)),
+        (r'role\s*=\s*["\']([^"\']+)["\']', lambda m: m.group(1)),
+        (r'<(\w+)', lambda m: m.group(1))
+    ]
 
-        return "unknown"
+    for pattern, extractor in patterns:
+        match = re.search(pattern, code_snippet, re.IGNORECASE)
+        if match:
+            return extractor(match)
 
-    def _estimate_bounding_box(self, issue: Dict[str, Any]) -> Dict[str, int]:
-        """Estimate bounding box with infotainment considerations"""
-        element_type = issue.get("ui_preview", {}).get("element_type", "unknown")
+    return "unknown"
 
-        # Infotainment-specific sizing
-        size_map = {
-            "button": {"width": 120, "height": 60},  # Larger for touch
-            "input": {"width": 200, "height": 50},
-            "img": {"width": 100, "height": 100},
-            "select": {"width": 180, "height": 50},
-            "unknown": {"width": 100, "height": 40}
-        }
 
-        size = size_map.get(element_type, size_map["unknown"])
+def _estimate_bounding_box(self, issue: Dict[str, Any]) -> Dict[str, int]:
+    """Estimate bounding box with infotainment considerations"""
+    element_type = issue.get("ui_preview", {}).get("element_type", "unknown")
 
-        return {
-            "x": 100,
-            "y": 100,
-            "width": size["width"],
-            "height": size["height"]
-        }
+    # Infotainment-specific sizing
+    size_map = {
+        "button": {"width": 120, "height": 60},  # Larger for touch
+        "input": {"width": 200, "height": 50},
+        "img": {"width": 100, "height": 100},
+        "select": {"width": 180, "height": 50},
+        "unknown": {"width": 100, "height": 40}
+    }
 
-    def _generate_preview_html(self, issue: Dict[str, Any], file_info: Dict[str, Any]) -> str:
-        """Generate enhanced HTML preview"""
-        code_snippet = issue.get("code_snippet", "")
-        wcag_guideline = issue.get("wcag_guideline", "")
+    size = size_map.get(element_type, size_map["unknown"])
 
-        preview = f"""
+    return {
+        "x": 100,
+        "y": 100,
+        "width": size["width"],
+        "height": size["height"]
+    }
+
+
+def _generate_preview_html(self, issue: Dict[str, Any], file_info: Dict[str, Any]) -> str:
+    """Generate enhanced HTML preview"""
+    code_snippet = issue.get("code_snippet", "")
+    wcag_guideline = issue.get("wcag_guideline", "")
+
+    preview = f"""
         <div class="accessibility-preview infotainment-theme">
             <div class="issue-highlight">
                 <div class="code-snippet">{code_snippet}</div>
@@ -924,54 +685,357 @@ class WCAGAnalyzer:
         </div>
         """
 
-        return preview
+    return preview
 
-    def _generate_annotations(self, issue: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Generate enhanced annotations"""
-        annotations = [
-            {
-                "type": "error",
-                "position": {"x": 10, "y": 10},
-                "message": issue.get("description", "Accessibility issue"),
-                "severity": issue.get("severity", "A"),
-                "infotainment_risk": issue.get("infotainment_risk", "medium"),
-                "driver_safety": issue.get("driver_safety_impact", "minor")
-            }
-        ]
 
-        # Add infotainment-specific annotations
-        if issue.get("infotainment_risk") == "critical":
-            annotations.append({
-                "type": "warning",
-                "position": {"x": 50, "y": 10},
-                "message": "Critical for driver safety",
-                "severity": "critical"
+def _generate_annotations(self, issue: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Generate enhanced annotations"""
+    annotations = [
+        {
+            "type": "error",
+            "position": {"x": 10, "y": 10},
+            "message": issue.get("description", "Accessibility issue"),
+            "severity": issue.get("severity", "A"),
+            "infotainment_risk": issue.get("infotainment_risk", "medium"),
+            "driver_safety": issue.get("driver_safety_impact", "minor")
+        }
+    ]
+
+    # Add infotainment-specific annotations
+    if issue.get("infotainment_risk") == "critical":
+        annotations.append({
+            "type": "warning",
+            "position": {"x": 50, "y": 10},
+            "message": "Critical for driver safety",
+            "severity": "critical"
+        })
+
+    return annotations
+
+
+def _calculate_fix_confidence(self, issue: Dict[str, Any]) -> float:
+    """Calculate enhanced fix confidence score"""
+    base_confidence = 0.7
+
+    # Adjust based on validation score
+    validation_score = issue.get("validation_score", 0.5)
+    base_confidence *= validation_score
+
+    # Adjust based on severity
+    severity = issue.get("severity", "A")
+    if severity == "A":
+        base_confidence += 0.2
+    elif severity == "AA":
+        base_confidence += 0.1
+
+    # Adjust based on static vs LLM analysis
+    if issue.get("source") == "static_analysis":
+        base_confidence += 0.1
+
+    # Adjust based on code snippet quality
+    code_snippet = issue.get("code_snippet", "")
+    if len(code_snippet) > 10 and "<" in code_snippet:
+        base_confidence += 0.1
+
+    return min(1.0, base_confidence)
+    for pattern in search_patterns[guideline_num]:
+        if re.search(pattern, line, re.IGNORECASE):
+            matching_lines.append(i)
+            break
+
+
+return matching_lines
+
+return []
+
+
+def _extract_keywords_from_issue(self, issue: Dict[str, Any]) -> List[str]:
+    """Extract relevant keywords from issue description"""
+    description = issue.get('description', '').lower()
+    code_snippet = issue.get('code_snippet', '').lower()
+
+    # Common HTML/CSS/JS keywords to look for
+    keywords = []
+
+    # Extract HTML tags
+    html_tags = re.findall(r'<(\w+)', code_snippet)
+    keywords.extend(html_tags)
+
+    # Extract attribute names
+    attributes = re.findall(r'(\w+)\s*=', code_snippet)
+    keywords.extend(attributes)
+
+    # Extract keywords from description
+    keyword_patterns = [
+        r'\b(alt|src|href|role|aria-\w+|tabindex|onclick|onkeydown)\b',
+        r'\b(button|input|img|label|select|textarea)\b',
+        r'\b(focus|hover|active|visited)\b'
+    ]
+
+    for pattern in keyword_patterns:
+        matches = re.findall(pattern, description)
+        keywords.extend(matches)
+
+    return list(set(keywords))  # Remove duplicates
+
+
+def _extract_accurate_code_context(self, code: str, line_numbers: List[int]) -> Dict[str, Any]:
+    """Extract code context with improved accuracy"""
+    lines = code.split('\n')
+
+    if not line_numbers:
+        return {"lines": [], "start_line": 0, "end_line": 0}
+
+    # Expand context window based on code complexity
+    context_window = 3  # Default context
+    min_line = max(0, min(line_numbers) - context_window)
+    max_line = min(len(lines), max(line_numbers) + context_window)
+
+    context_lines = []
+    for i in range(min_line, max_line):
+        is_highlighted = (i + 1) in line_numbers
+        line_content = lines[i] if i < len(lines) else ""
+
+        context_lines.append({
+            "number": i + 1,
+            "content": line_content,
+            "highlighted": is_highlighted,
+            "indentation": len(line_content) - len(line_content.lstrip()),
+            "is_empty": not line_content.strip()
+        })
+
+    return {
+        "lines": context_lines,
+        "start_line": min_line + 1,
+        "end_line": max_line,
+        "highlighted_lines": line_numbers
+    }
+
+
+def _extract_precise_code_snippet(self, code: str, line_numbers: List[int],
+                                  original_snippet: str) -> str:
+    """Extract precise code snippet from validated line numbers"""
+    lines = code.split('\n')
+
+    if not line_numbers:
+        return original_snippet
+
+    # Get the actual lines
+    actual_lines = []
+    for line_num in line_numbers:
+        if 1 <= line_num <= len(lines):
+            actual_lines.append(lines[line_num - 1])
+
+    if actual_lines:
+        # If we have multiple lines, join them intelligently
+        if len(actual_lines) == 1:
+            return actual_lines[0].strip()
+        else:
+            # For multiple lines, preserve important structure
+            return '\n'.join(line.rstrip() for line in actual_lines)
+
+    return original_snippet
+
+
+def _calculate_validation_score(self, issue: Dict[str, Any], original_code: str) -> float:
+    """Calculate a validation score for the issue"""
+    score = 0.0
+
+    # Line number accuracy (40% of score)
+    line_numbers = issue.get('line_numbers', [])
+    if line_numbers:
+        lines = original_code.split('\n')
+        valid_lines = sum(1 for ln in line_numbers if 1 <= ln <= len(lines))
+        score += 0.4 * (valid_lines / len(line_numbers))
+
+    # Code snippet relevance (30% of score)
+    code_snippet = issue.get('code_snippet', '')
+    if code_snippet and line_numbers:
+        if any(code_snippet.strip() in original_code.split('\n')[ln - 1]
+               for ln in line_numbers if 1 <= ln <= len(original_code.split('\n'))):
+            score += 0.3
+
+    # WCAG guideline specificity (20% of score)
+    wcag_guideline = issue.get('wcag_guideline', '')
+    if re.match(r'\d+\.\d+\.\d+', wcag_guideline):
+        score += 0.2
+
+    # Description quality (10% of score)
+    description = issue.get('description', '')
+    if len(description) > 20 and any(keyword in description.lower()
+                                     for keyword in
+                                     ['accessibility', 'wcag', 'screen reader', 'keyboard', 'focus']):
+        score += 0.1
+
+    return min(score, 1.0)
+
+
+def _perform_static_analysis(self, code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Enhanced static analysis with precise line detection"""
+    issues = []
+    file_type = self._determine_file_type(file_info["name"])
+
+    try:
+        if file_type == "html":
+            issues.extend(self._analyze_html_enhanced(code, file_info))
+        elif file_type == "css":
+            issues.extend(self._analyze_css_enhanced(code, file_info))
+        elif file_type == "xml":
+            issues.extend(self._analyze_xml_enhanced(code, file_info))
+        elif file_type in ["jsx", "tsx", "javascript"]:
+            issues.extend(self._analyze_react_enhanced(code, file_info))
+    except Exception as e:
+        print(f"Static analysis error for {file_type}: {str(e)}")
+        # Continue without this specific analysis
+
+    return issues
+
+
+def _analyze_html_enhanced(self, html_code: str, file_info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Enhanced HTML analysis with precise line detection"""
+    issues = []
+    lines = html_code.split('\n')
+
+    try:
+        soup = BeautifulSoup(html_code, 'html.parser')
+
+        # Check for missing alt attributes with precise line detection
+        images = soup.find_all('img')
+        for i, img in enumerate(images):
+            if not img.get('alt'):
+                # Find exact line number
+                img_line = self._find_element_line_precise(html_code, str(img))
+                issues.append({
+                    "issue_id": f"STATIC_1_1_1_{i:03d}",
+                    "wcag_guideline": "1.1.1 Non-text Content",
+                    "severity": "A",
+                    "description": f"Image element missing alt attribute on line {img_line}",
+                    "line_numbers": [img_line],
+                    "code_snippet": str(img),
+                    "recommendation": "Add descriptive alt attribute: alt='description of image content'",
+                    "category": "perceivable",
+                    "source": "static_analysis",
+                    "infotainment_risk": "high" if any(keyword in str(img).lower()
+                                                       for keyword in ['icon', 'button', 'control']) else "medium",
+                    "driver_safety_impact": "moderate"
+                })
+
+        # Check for missing form labels with enhanced detection
+        inputs = soup.find_all('input')
+        for i, input_elem in enumerate(inputs):
+            input_type = input_elem.get('type', 'text').lower()
+            if input_type not in ['hidden', 'submit', 'button']:
+                has_label = (input_elem.get('aria-label') or
+                             input_elem.get('aria-labelledby') or
+                             input_elem.get('title'))
+
+                # Check for associated label element
+                input_id = input_elem.get('id')
+                if input_id:
+                    associated_label = soup.find('label', {'for': input_id})
+                    if associated_label:
+                        has_label = True
+
+                if not has_label:
+                    input_line = self._find_element_line_precise(html_code, str(input_elem))
+                    issues.append({
+                        "issue_id": f"STATIC_3_3_2_{i:03d}",
+                        "wcag_guideline": "3.3.2 Labels or Instructions",
+                        "severity": "A",
+                        "description": f"Form input missing accessible label on line {input_line}",
+                        "line_numbers": [input_line],
+                        "code_snippet": str(input_elem),
+                        "recommendation": "Add label: <label for='inputId'>Label text</label> or aria-label='Label text'",
+                        "category": "understandable",
+                        "source": "static_analysis",
+                        "infotainment_risk": "high",
+                        "driver_safety_impact": "critical"
+                    })
+
+        # Check for missing focus styles
+        if not re.search(r':focus\s*{[^}]*outline\s*:[^}]*}', html_code, re.IGNORECASE):
+            issues.append({
+                "issue_id": "STATIC_2_4_7_001",
+                "wcag_guideline": "2.4.7 Focus Visible",
+                "severity": "AA",
+                "description": "No visible focus indicators found in document",
+                "line_numbers": [1],
+                "code_snippet": "<!-- Add focus styles for interactive elements -->",
+                "recommendation": "Add CSS focus styles: button:focus { outline: 2px solid #0066cc; }",
+                "category": "operable",
+                "source": "static_analysis",
+                "infotainment_risk": "critical",
+                "driver_safety_impact": "critical"
             })
 
-        return annotations
+        # Check for keyboard event handlers
+        interactive_elements = soup.find_all(['button', 'a', 'input'])
+        for elem in interactive_elements:
+            if elem.get('onclick') and not (elem.get('onkeydown') or elem.get('onkeypress')):
+                elem_line = self._find_element_line_precise(html_code, str(elem))
+                issues.append({
+                    "issue_id": f"STATIC_2_1_1_KEYBOARD_{elem.name}_{elem_line}",
+                    "wcag_guideline": "2.1.1 Keyboard",
+                    "severity": "A",
+                    "description": f"Interactive element with onclick but no keyboard support on line {elem_line}",
+                    "line_numbers": [elem_line],
+                    "code_snippet": str(elem),
+                    "recommendation": "Add keyboard event handler: onkeydown='if(event.key===\"Enter\"||event.key===\" \")clickHandler()'",
+                    "category": "operable",
+                    "source": "static_analysis",
+                    "infotainment_risk": "critical",
+                    "driver_safety_impact": "critical"
+                })
 
-    def _calculate_fix_confidence(self, issue: Dict[str, Any]) -> float:
-        """Calculate enhanced fix confidence score"""
-        base_confidence = 0.7
+    except Exception as e:
+        issues.append({
+            "issue_id": "STATIC_4_1_1_001",
+            "wcag_guideline": "4.1.1 Parsing",
+            "severity": "A",
+            "description": f"HTML parsing error: {str(e)}",
+            "line_numbers": [1],
+            "code_snippet": "<!-- HTML parsing failed -->",
+            "recommendation": "Fix HTML syntax errors",
+            "category": "robust",
+            "source": "static_analysis",
+            "infotainment_risk": "high",
+            "driver_safety_impact": "moderate"
+        })
 
-        # Adjust based on validation score
-        validation_score = issue.get("validation_score", 0.5)
-        base_confidence *= validation_score
+    return issues
 
-        # Adjust based on severity
-        severity = issue.get("severity", "A")
-        if severity == "A":
-            base_confidence += 0.2
-        elif severity == "AA":
-            base_confidence += 0.1
 
-        # Adjust based on static vs LLM analysis
-        if issue.get("source") == "static_analysis":
-            base_confidence += 0.1
+def _find_element_line_precise(self, html_code: str, element_str: str) -> int:
+    """Find precise line number of HTML element using multiple strategies"""
+    lines = html_code.split('\n')
 
-        # Adjust based on code snippet quality
-        code_snippet = issue.get("code_snippet", "")
-        if len(code_snippet) > 10 and "<" in code_snippet:
-            base_confidence += 0.1
+    # Strategy 1: Exact match
+    for i, line in enumerate(lines, 1):
+        if element_str.strip() in line:
+            return i
 
-        return min(1.0, base_confidence)
+    # Strategy 2: Parse element and look for key attributes
+    try:
+        soup = BeautifulSoup(element_str, 'html.parser')
+        element = soup.find()
+        if element:
+            tag_name = element.name
+
+            # Look for opening tag with attributes
+            attributes = []
+            for attr, value in element.attrs.items():
+                if isinstance(value, list):
+                    value = ' '.join(value)
+                attributes.append(f'{attr}="{value}"')
+
+            # Create search patterns
+            patterns = [
+                f'<{tag_name}\\b[^>]*>',  # Any opening tag
+                f'<{tag_name}\\s+'  # Tag with space (likely has attributes)
+            ]
+
+            # Add attribute-specific patterns
+            for attr in attributes:
+                patterns.append(re.escape(attr))
+
+            for i, line in enumerate(lines, 1):

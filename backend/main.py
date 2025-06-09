@@ -119,7 +119,7 @@ analysis_sessions = {}
 class AnalysisRequest(BaseModel):
     session_id: str
     models: List[str]
-    analysis_type: str  # "detection" or "remediation"
+    # Removed analysis_type since we only do detection now
 
 
 class RemediationRequest(BaseModel):
@@ -225,11 +225,10 @@ async def upload_files(files: List[UploadFile] = File(...)):
 
 @app.post("/analyze")
 async def analyze_accessibility(request: AnalysisRequest):
-    """Perform accessibility analysis using specified LLM models"""
-    logger.info(f"=== STARTING ANALYSIS ===")
+    """Perform accessibility analysis using specified LLM models - Detection Only"""
+    logger.info(f"=== STARTING DETECTION ANALYSIS ===")
     logger.info(f"Session ID: {request.session_id}")
     logger.info(f"Models: {request.models}")
-    logger.info(f"Analysis Type: {request.analysis_type}")
 
     if request.session_id not in analysis_sessions:
         logger.error(f"Session not found: {request.session_id}")
@@ -299,21 +298,15 @@ async def analyze_accessibility(request: AnalysisRequest):
                         })
                         continue
 
-                    # Analyze with LLM
-                    logger.info(f"Starting LLM analysis with {model}...")
+                    # Analyze with LLM for detection only
+                    logger.info(f"Starting LLM detection analysis with {model}...")
                     try:
-                        if request.analysis_type == "detection":
-                            logger.info(f"Calling detect_accessibility_issues...")
-                            analysis_result = await llm_client.detect_accessibility_issues(
-                                content, file_info["name"], model
-                            )
-                        else:
-                            logger.info(f"Calling fix_accessibility_issues...")
-                            analysis_result = await llm_client.fix_accessibility_issues(
-                                content, file_info["name"], model
-                            )
+                        logger.info(f"Calling detect_accessibility_issues...")
+                        analysis_result = await llm_client.detect_accessibility_issues(
+                            content, file_info["name"], model
+                        )
 
-                        log_success("LLM analysis completed")
+                        log_success("LLM detection analysis completed")
                         logger.info(f"Result keys: {list(analysis_result.keys())}")
 
                         # Log the result structure for debugging
@@ -321,7 +314,7 @@ async def analyze_accessibility(request: AnalysisRequest):
                             log_error(f"LLM returned error: {analysis_result['error']}")
                         else:
                             issues_count = len(analysis_result.get("issues", []))
-                            logger.info(f"Found {issues_count} issues")
+                            logger.info(f"Found {issues_count} accessibility issues")
 
                     except Exception as e:
                         log_error(f"LLM analysis failed: {str(e)}")
@@ -372,20 +365,17 @@ async def analyze_accessibility(request: AnalysisRequest):
             results[model] = model_results
             log_success(f"Model {model} processing completed: {len(model_results)} files processed")
 
-        # Store results
-        if request.analysis_type == "detection":
-            session["analysis_results"] = results
-        else:
-            session["remediation_results"] = results
+        # Store results in analysis_results (detection only)
+        session["analysis_results"] = results
 
-        logger.info(f"=== ANALYSIS COMPLETED SUCCESSFULLY ===")
+        logger.info(f"=== DETECTION ANALYSIS COMPLETED SUCCESSFULLY ===")
         logger.info(f"Session: {request.session_id}")
         logger.info(f"Models processed: {len(results)}")
 
         return {
             "session_id": request.session_id,
             "results": results,
-            "analysis_type": request.analysis_type
+            "analysis_type": "detection"
         }
 
     except HTTPException:
