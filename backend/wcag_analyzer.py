@@ -115,13 +115,29 @@ class WCAGAnalyzer:
             "llm_result": llm_result
         }
 
+    # Add this improved validation method to wcag_analyzer.py
+
     def _validate_issue_existence(self, issue: Dict[str, Any], original_code: str) -> bool:
-        """Validate that an issue actually exists in the code"""
+        """Validate that an issue actually exists in the code with improved flexibility"""
         lines = original_code.split('\n')
         line_numbers = issue.get('line_numbers', [])
         code_snippet = issue.get('code_snippet', '').strip()
 
-        if not line_numbers or not code_snippet:
+        # If no line numbers provided, try to find the snippet
+        if not line_numbers and code_snippet:
+            # Search for the snippet in the entire code
+            for i, line in enumerate(lines, 1):
+                if self._fuzzy_match_code(code_snippet, line):
+                    line_numbers = [i]
+                    issue['line_numbers'] = line_numbers
+                    break
+
+        if not line_numbers:
+            # For certain WCAG guidelines, we can be more lenient
+            wcag_guideline = issue.get('wcag_guideline', '')
+            if any(critical in wcag_guideline for critical in ['2.1.1', '2.4.7', '2.5.8']):
+                # These are critical issues - give them more weight
+                return True
             return False
 
         # Check if at least one line number contains relevant code
@@ -136,23 +152,33 @@ class WCAGAnalyzer:
                         self._semantic_match_code(issue, line_content)):
                     matches += 1
 
-        # Issue is valid if at least 50% of line numbers match
-        return matches >= max(1, len(line_numbers) * 0.5)
+        # Lower the threshold for validation - accept if ANY line matches
+        return matches > 0
 
     def _fuzzy_match_code(self, snippet: str, line_content: str) -> bool:
-        """Fuzzy matching for code snippets"""
+        """Enhanced fuzzy matching for code snippets"""
         # Remove whitespace and normalize
         snippet_clean = re.sub(r'\s+', '', snippet.lower())
         line_clean = re.sub(r'\s+', '', line_content.lower())
 
-        # Check if significant parts match
-        if len(snippet_clean) > 10:
-            # For longer snippets, check if major parts are present
-            snippet_words = snippet_clean.split()
-            return sum(word in line_clean for word in snippet_words if len(word) > 3) >= len(snippet_words) * 0.6
-        else:
-            # For shorter snippets, be more strict
-            return snippet_clean in line_clean
+        # Direct substring match
+        if snippet_clean in line_clean or line_clean in snippet_clean:
+            return True
+
+        # Check if key HTML elements/attributes match
+        snippet_elements = re.findall(r'<(\w+)|(\w+)=|class="([^"]+)"|id="([^"]+)"', snippet.lower())
+        line_elements = re.findall(r'<(\w+)|(\w+)=|class="([^"]+)"|id="([^"]+)"', line_content.lower())
+
+        # Flatten and filter empty strings
+        snippet_parts = [part for group in snippet_elements for part in group if part]
+        line_parts = [part for group in line_elements for part in group if part]
+
+        # Check overlap
+        if snippet_parts and line_parts:
+            overlap = set(snippet_parts) & set(line_parts)
+            return len(overlap) >= len(snippet_parts) * 0.5
+
+        return False
 
     def _semantic_match_code(self, issue: Dict[str, Any], line_content: str) -> bool:
         """Semantic matching based on issue type"""
@@ -752,7 +778,6 @@ class WCAGAnalyzer:
                 return extractor(match)
 
         return "unknown"
-
     def _estimate_bounding_box(self, issue: Dict[str, Any]) -> Dict[str, int]:
         """Estimate bounding box with infotainment considerations"""
         element_type = issue.get("ui_preview", {}).get("element_type", "unknown")
