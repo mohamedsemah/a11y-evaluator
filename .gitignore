@@ -4,10 +4,12 @@ __pycache__/
 *.pyc
 
 # Environment
-.env
 venv/
 env/
 .venv/
+.env
+backend/.env
+*.env
 
 # IDE
 .vscode/
