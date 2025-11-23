@@ -46,6 +46,30 @@ class Settings(BaseSettings):
     # Paths
     TEMP_SESSIONS_DIR: str = "temp_sessions"
     
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FILE: str = "accessibility_analyzer.log"
+    LOG_JSON_FORMAT: bool = True
+    
+    # Error Tracking (Sentry)
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    
+    # Caching (Redis)
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_ENABLED: bool = True
+    CACHE_TTL_SECONDS: int = 3600  # 1 hour default
+    
+    # Background Jobs (Celery)
+    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_ENABLED: bool = False  # Set to True to enable Celery
+    
+    # File Cleanup
+    CLEANUP_INTERVAL_SECONDS: int = 3600  # 1 hour
+    MAX_FILE_AGE_HOURS: int = 48
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

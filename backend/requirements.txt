@@ -59,3 +59,19 @@ alembic==1.12.1
 
 # Security headers
 secure==0.3.0
+
+# Structured logging and error tracking
+sentry-sdk[fastapi]==1.38.0
+
+# Caching
+redis==5.0.1
+
+# Background job processing
+celery==5.3.4
+kombu==5.3.4
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0

@@ -9,6 +9,10 @@ import anthropic
 import replicate
 import logging
 
+# P1: Retry logic and error tracking
+from retry_logic import retry_async, RetryConfig, RetryStrategy, circuit_breakers
+from error_tracking import capture_exception
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -527,8 +531,35 @@ Focus on:
         return type_mapping.get(ext, 'other')
 
     async def _call_model(self, prompt: str, model: str) -> Dict[str, Any]:
-        """Unified model calling with better error handling"""
-        try:
+        """Unified model calling with retry logic and error handling (P1)"""
+        # Determine provider for circuit breaker
+        provider = None
+        if model == "gpt-4o":
+            provider = "openai"
+        elif model == "claude-opus-4":
+            provider = "anthropic"
+        elif model == "deepseek-v3":
+            provider = "deepseek"
+        elif model == "llama-maverick":
+            provider = "replicate"
+        
+        # Get circuit breaker for this provider
+        circuit_breaker = circuit_breakers.get(provider) if provider else None
+        
+        # Configure retry logic
+        retry_config = RetryConfig(
+            max_attempts=3,
+            initial_delay=1.0,
+            max_delay=30.0,
+            exponential_base=2.0,
+            strategy=RetryStrategy.EXPONENTIAL_BACKOFF,
+            retryable_exceptions=[Exception, ConnectionError, TimeoutError, asyncio.TimeoutError],
+            jitter=True,
+            circuit_breaker=circuit_breaker
+        )
+        
+        async def call_provider():
+            """Inner function to call the appropriate provider"""
             if model == "gpt-4o":
                 return await self._call_openai(prompt, model)
             elif model == "claude-opus-4":
@@ -539,8 +570,32 @@ Focus on:
                 return await self._call_replicate(prompt)
             else:
                 raise ValueError(f"Unsupported model: {model}")
+        
+        try:
+            # Use retry logic with circuit breaker if available
+            if RETRY_AVAILABLE:
+                result = await retry_async(call_provider, config=retry_config)
+            else:
+                # Fallback to direct call without retry
+                result = await call_provider()
+            return result
         except Exception as e:
-            logger.error(f"Model {model} failed: {str(e)}")
+            logger.error(f"Model {model} failed after retries: {str(e)}")
+            # Capture to error tracking if available
+            if RETRY_AVAILABLE:
+                try:
+                    capture_exception(
+                        e,
+                        level="error",
+                        context={
+                            "model": model,
+                            "provider": provider,
+                            "prompt_length": len(prompt)
+                        },
+                        tags={"component": "llm_client", "model": model}
+                    )
+                except Exception:
+                    pass  # Don't fail if error tracking fails
             raise Exception(f"Model {model} failed: {str(e)}")
 
     async def _call_openai(self, prompt: str, model: str = "gpt-4o") -> Dict[str, Any]:

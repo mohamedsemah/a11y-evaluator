@@ -37,6 +37,15 @@ from validators import (
 )
 from auth import get_current_user
 
+# P1 Production Features
+from structured_logging import setup_structured_logging, get_logger
+from error_tracking import init_sentry, capture_exception, set_user_context
+from retry_logic import retry_async, LLM_API_RETRY_CONFIG, circuit_breakers
+from file_cleanup import get_cleanup_job
+from caching import cache_manager
+from background_jobs import init_celery, get_job_queue
+from health_checks import liveness_check, readiness_check, detailed_health_check
+
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -79,26 +88,16 @@ class UTF8StreamHandler(logging.StreamHandler):
             print(safe_msg)
 
 
-# Setup logging with UTF-8 support
-log_formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Setup structured logging (P1)
+setup_structured_logging(
+    log_level=settings.LOG_LEVEL,
+    log_file=settings.LOG_FILE if settings.LOG_FILE else None,
+    enable_console=True,
+    enable_json=settings.LOG_JSON_FORMAT
 )
 
-# File handler with UTF-8 encoding
-file_handler = UTF8FileHandler('accessibility_analyzer.log')
-file_handler.setFormatter(log_formatter)
-
-# Console handler with Unicode fallback
-console_handler = UTF8StreamHandler(sys.stdout)
-console_handler.setFormatter(log_formatter)
-
-# Configure root logger
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[console_handler, file_handler]
-)
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+logger.info("Application starting", app_name=settings.APP_NAME, version=settings.APP_VERSION)
 
 
 # Safe logging functions that replace Unicode with ASCII alternatives
@@ -121,10 +120,33 @@ def log_warning(message):
 
 
 app = FastAPI(
-    title="Infotainment Accessibility Analyzer", 
-    version="1.0.0",
+    title=settings.APP_NAME, 
+    version=settings.APP_VERSION,
+    description="""
+    Production-ready accessibility analyzer for infotainment systems.
+    
+    ## Features
+    
+    * **WCAG 2.2 Compliance Analysis**: Comprehensive accessibility detection
+    * **Multi-LLM Support**: GPT-4o, Claude Opus 4, DeepSeek-V3, LLaMA Maverick
+    * **Remediation**: AI-powered code fixes with preview and rollback
+    * **Session Management**: Persistent sessions with expiration
+    * **Security**: Authentication, rate limiting, input validation
+    
+    ## Authentication
+    
+    Set `AUTH_REQUIRED=True` in environment to enable API key authentication.
+    Include `X-API-Key` header with requests.
+    """,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Upload", "description": "File upload operations"},
+        {"name": "Analysis", "description": "Accessibility analysis operations"},
+        {"name": "Remediation", "description": "Code remediation operations"},
+        {"name": "Session", "description": "Session management"},
+        {"name": "Health", "description": "Health check endpoints"},
+    ]
 )
 
 # Add security headers middleware (first, so it applies to all responses)
@@ -894,96 +916,121 @@ async def download_report(
         raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    """Basic health check endpoint - liveness probe"""
+    return await liveness_check()
 
 
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """Detailed health check - SECURITY: Does not expose API key details"""
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "services_configured": 0,
-        "database": "unknown"
-    }
+@app.get("/health/ready", tags=["Health"])
+async def health_ready():
+    """Readiness probe - checks if service is ready to serve traffic"""
+    return await readiness_check()
 
-    try:
-        # Check API keys without exposing them
-        services = {
-            "openai": settings.OPENAI_API_KEY,
-            "anthropic": settings.ANTHROPIC_API_KEY,
-            "deepseek": settings.DEEPSEEK_API_KEY,
-            "replicate": settings.REPLICATE_API_TOKEN
-        }
 
-        configured_count = sum(1 for key in services.values() if key)
-        health_status["services_configured"] = configured_count
-
-        # Check if at least one service is available (without exposing which ones)
-        if configured_count == 0:
-            health_status["status"] = "degraded"
-            health_status["message"] = "No LLM services configured"
-        elif configured_count < len(services):
-            health_status["status"] = "degraded"
-            health_status["message"] = f"{configured_count}/{len(services)} LLM services configured"
-        
-        # Check database connectivity
-        try:
-            test_session = get_session("test")  # This will fail but test connection
-            health_status["database"] = "connected"
-        except Exception:
-            # Try to create a test session to verify DB works
-            try:
-                from database import SessionLocal
-                db = SessionLocal()
-                db.close()
-                health_status["database"] = "connected"
-            except Exception as db_error:
-                health_status["database"] = "error"
-                health_status["status"] = "degraded"
-                logger.warning(f"Database check failed: {str(db_error)}")
-
-    except Exception as e:
-        health_status["status"] = "error"
-        health_status["error"] = "Health check failed"
-        logger.error(f"Health check error: {str(e)}")
-
-    return health_status
+@app.get("/health/detailed", tags=["Health"])
+async def health_detailed():
+    """Detailed health check with all dependencies"""
+    return await detailed_health_check()
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize application on startup"""
-    # Create temp directories
-    Path(settings.TEMP_SESSIONS_DIR).mkdir(exist_ok=True)
+    """Initialize application on startup - P1 Production Features"""
+    logger.info("Application startup initiated", phase="startup")
     
-    # Initialize database
-    init_db()
+    try:
+        # 1. Initialize Sentry error tracking (P1)
+        if settings.SENTRY_DSN:
+            init_sentry(
+                dsn=settings.SENTRY_DSN,
+                environment=settings.SENTRY_ENVIRONMENT,
+                release=settings.APP_VERSION,
+                traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE
+            )
+            logger.info("Sentry error tracking initialized")
+        else:
+            logger.info("Sentry not configured (SENTRY_DSN not set)")
+        
+        # 2. Initialize cache (P1)
+        if settings.CACHE_ENABLED:
+            await cache_manager.initialize()
+            logger.info("Cache manager initialized")
+        
+        # 3. Initialize Celery for background jobs (P1)
+        if settings.CELERY_ENABLED:
+            if init_celery():
+                logger.info("Celery background jobs initialized")
+            else:
+                logger.warning("Celery initialization failed, using in-process queue")
+        
+        # 4. Create temp directories
+        Path(settings.TEMP_SESSIONS_DIR).mkdir(exist_ok=True)
+        logger.info("Temp directories created", path=settings.TEMP_SESSIONS_DIR)
+        
+        # 5. Initialize database
+        init_db()
+        logger.info("Database initialized")
+        
+        # 6. Clean up expired sessions
+        deleted_count = delete_expired_sessions()
+        if deleted_count > 0:
+            logger.info("Expired sessions cleaned up", count=deleted_count)
+        
+        # 7. Start file cleanup job (P1)
+        cleanup_job = get_cleanup_job()
+        await cleanup_job.start()
+        logger.info("File cleanup job started")
+        
+        # 8. Log configuration summary
+        api_key_count = sum(1 for k in [
+            settings.OPENAI_API_KEY, 
+            settings.ANTHROPIC_API_KEY, 
+            settings.DEEPSEEK_API_KEY,
+            settings.REPLICATE_API_TOKEN
+        ] if k)
+        
+        logger.info("Application startup complete", 
+                   api_keys_configured=api_key_count,
+                   rate_limiting=settings.RATE_LIMIT_ENABLED,
+                   auth_required=settings.AUTH_REQUIRED,
+                   max_file_size_mb=settings.MAX_FILE_SIZE / (1024*1024),
+                   max_total_size_mb=settings.MAX_TOTAL_SIZE / (1024*1024))
     
-    # Clean up expired sessions
-    deleted_count = delete_expired_sessions()
-    if deleted_count > 0:
-        logger.info(f"Cleaned up {deleted_count} expired sessions on startup")
+    except Exception as e:
+        logger.error("Startup failed", error=str(e), exc_info=True)
+        capture_exception(e, context={"phase": "startup"})
+        raise
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on application shutdown"""
+    logger.info("Application shutdown initiated")
     
-    # Log configuration
-    api_key_count = sum(1 for k in [
-        settings.OPENAI_API_KEY, 
-        settings.ANTHROPIC_API_KEY, 
-        settings.DEEPSEEK_API_KEY,
-        settings.REPLICATE_API_TOKEN
-    ] if k)
-    logger.info(f"Starting Infotainment Accessibility Analyzer")
-    logger.info(f"API Keys configured: {api_key_count}/4")
-    logger.info(f"Rate limiting: {'enabled' if settings.RATE_LIMIT_ENABLED else 'disabled'}")
-    logger.info(f"Max file size: {settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
-    logger.info(f"Max total size: {settings.MAX_TOTAL_SIZE / (1024*1024):.1f} MB")
+    try:
+        # Stop file cleanup job
+        cleanup_job = get_cleanup_job()
+        await cleanup_job.stop()
+        logger.info("File cleanup job stopped")
+        
+        # Disconnect cache
+        if cache_manager.backend and hasattr(cache_manager.backend, 'disconnect'):
+            await cache_manager.backend.disconnect()
+            logger.info("Cache disconnected")
+        
+        logger.info("Application shutdown complete")
+    except Exception as e:
+        logger.error("Shutdown error", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting Infotainment Accessibility Analyzer")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info("Starting application server")
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        log_config=None  # We're using structured logging
+    )
