@@ -9,12 +9,17 @@ import anthropic
 import replicate
 import logging
 
-# P1: Retry logic and error tracking
-from retry_logic import retry_async, RetryConfig, RetryStrategy, circuit_breakers
-from error_tracking import capture_exception
-
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# P1: Retry logic and error tracking
+try:
+    from retry_logic import retry_async, RetryConfig, RetryStrategy, circuit_breakers
+    from error_tracking import capture_exception
+    RETRY_AVAILABLE = True
+except ImportError:
+    RETRY_AVAILABLE = False
+    logger.warning("Retry logic not available. Install required dependencies.")
 
 
 class LLMClient:

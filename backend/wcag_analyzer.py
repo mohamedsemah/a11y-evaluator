@@ -81,11 +81,15 @@ class WCAGAnalyzer:
     def process_llm_result(self, llm_result: Dict[str, Any], file_info: Dict[str, Any],
                            original_code: str) -> Dict[str, Any]:
         """Process and enhance LLM analysis results with improved validation"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if llm_result.get("error"):
             return llm_result
 
         # Enhanced processing of detected issues
         enhanced_issues = []
+        llm_issues_count = len(llm_result.get("issues", []))
 
         for issue in llm_result.get("issues", []):
             enhanced_issue = self._enhance_issue(issue, file_info, original_code)
@@ -94,25 +98,48 @@ class WCAGAnalyzer:
             if self._validate_issue_existence(enhanced_issue, original_code):
                 enhanced_issues.append(enhanced_issue)
             else:
-                print(f"Rejected invalid issue: {issue.get('issue_id', 'Unknown')}")
+                logger.debug(f"Rejected invalid issue: {issue.get('issue_id', 'Unknown')}")
 
+        llm_validated_count = len(enhanced_issues)
+        
         # Add static analysis results
+        static_issues_count = 0
         try:
             static_issues = self._perform_static_analysis(original_code, file_info)
+            static_issues_count = len(static_issues)
             enhanced_issues.extend(static_issues)
+            
+            if static_issues_count > 0:
+                logger.info(
+                    f"Static analysis added {static_issues_count} additional issues to {file_info.get('name', 'file')} "
+                    f"(LLM: {llm_validated_count}, Static: {static_issues_count}, Total: {len(enhanced_issues)})"
+                )
         except Exception as e:
-            print(f"Static analysis failed: {str(e)}")
+            logger.warning(f"Static analysis failed for {file_info.get('name', 'file')}: {str(e)}")
             # Continue without static analysis
 
         # Calculate metrics
         metrics = self._calculate_metrics(enhanced_issues)
+        
+        total_issues = len(enhanced_issues)
+        
+        # Log summary
+        if total_issues > 0:
+            logger.info(
+                f"WCAG processing complete for {file_info.get('name', 'file')}: "
+                f"{llm_validated_count} LLM issues (from {llm_issues_count} detected), "
+                f"{static_issues_count} static analysis issues, "
+                f"{total_issues} total issues"
+            )
 
         return {
             "file_info": file_info,
-            "total_issues": len(enhanced_issues),
+            "total_issues": total_issues,
             "issues": enhanced_issues,
             "metrics": metrics,
-            "llm_result": llm_result
+            "llm_result": llm_result,
+            "llm_issues_count": llm_validated_count,
+            "static_issues_count": static_issues_count
         }
 
     # Add this improved validation method to wcag_analyzer.py

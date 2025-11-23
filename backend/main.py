@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import asyncio
 from datetime import datetime
+from contextlib import asynccontextmanager
 import mimetypes
 from pydantic import BaseModel
 import logging
@@ -119,6 +120,96 @@ def log_warning(message):
     logger.warning(safe_message)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event handler for startup and shutdown"""
+    # Startup
+    logger.info("Application startup initiated", phase="startup")
+    
+    try:
+        # 1. Initialize Sentry error tracking (P1)
+        if settings.SENTRY_DSN:
+            init_sentry(
+                dsn=settings.SENTRY_DSN,
+                environment=settings.SENTRY_ENVIRONMENT,
+                release=settings.APP_VERSION,
+                traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE
+            )
+            logger.info("Sentry error tracking initialized")
+        else:
+            logger.info("Sentry not configured (SENTRY_DSN not set)")
+        
+        # 2. Initialize cache (P1)
+        if settings.CACHE_ENABLED:
+            await cache_manager.initialize()
+            logger.info("Cache manager initialized")
+        
+        # 3. Initialize Celery for background jobs (P1)
+        if settings.CELERY_ENABLED:
+            if init_celery():
+                logger.info("Celery background jobs initialized")
+            else:
+                logger.warning("Celery initialization failed, using in-process queue")
+        
+        # 4. Create temp directories
+        Path(settings.TEMP_SESSIONS_DIR).mkdir(exist_ok=True)
+        logger.info("Temp directories created", path=settings.TEMP_SESSIONS_DIR)
+        
+        # 5. Initialize database
+        init_db()
+        logger.info("Database initialized")
+        
+        # 6. Clean up expired sessions
+        deleted_count = delete_expired_sessions()
+        if deleted_count > 0:
+            logger.info("Expired sessions cleaned up", count=deleted_count)
+        
+        # 7. Start file cleanup job (P1)
+        cleanup_job = get_cleanup_job()
+        await cleanup_job.start()
+        logger.info("File cleanup job started")
+        
+        # 8. Log configuration summary
+        api_key_count = sum(1 for k in [
+            settings.OPENAI_API_KEY, 
+            settings.ANTHROPIC_API_KEY, 
+            settings.DEEPSEEK_API_KEY,
+            settings.REPLICATE_API_TOKEN
+        ] if k)
+        
+        logger.info("Application startup complete", 
+                   api_keys_configured=api_key_count,
+                   rate_limiting=settings.RATE_LIMIT_ENABLED,
+                   auth_required=settings.AUTH_REQUIRED,
+                   max_file_size_mb=settings.MAX_FILE_SIZE / (1024*1024),
+                   max_total_size_mb=settings.MAX_TOTAL_SIZE / (1024*1024))
+    
+    except Exception as e:
+        logger.error("Startup failed", error=str(e), exc_info=True)
+        capture_exception(e, context={"phase": "startup"})
+        raise
+    
+    yield  # Application runs here
+    
+    # Shutdown
+    logger.info("Application shutdown initiated")
+    
+    try:
+        # Stop file cleanup job
+        cleanup_job = get_cleanup_job()
+        await cleanup_job.stop()
+        logger.info("File cleanup job stopped")
+        
+        # Disconnect cache
+        if cache_manager.backend and hasattr(cache_manager.backend, 'disconnect'):
+            await cache_manager.backend.disconnect()
+            logger.info("Cache disconnected")
+        
+        logger.info("Application shutdown complete")
+    except Exception as e:
+        logger.error("Shutdown error", error=str(e), exc_info=True)
+
+
 app = FastAPI(
     title=settings.APP_NAME, 
     version=settings.APP_VERSION,
@@ -140,6 +231,7 @@ app = FastAPI(
     """,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
     openapi_tags=[
         {"name": "Upload", "description": "File upload operations"},
         {"name": "Analysis", "description": "Accessibility analysis operations"},
@@ -456,7 +548,10 @@ async def analyze_accessibility(
                             log_error(f"LLM returned error: {analysis_result['error']}")
                         else:
                             issues_count = len(analysis_result.get("issues", []))
-                            logger.info(f"Found {issues_count} accessibility issues")
+                            logger.info(
+                                f"LLM ({model}) detected {issues_count} accessibility issues in {file_info['name']} "
+                                f"(Note: Static analysis will add additional issues during WCAG processing)"
+                            )
 
                     except Exception as e:
                         log_error(f"LLM analysis failed: {str(e)}")
@@ -477,6 +572,16 @@ async def analyze_accessibility(
                         processed_result = wcag_analyzer.process_llm_result(
                             analysis_result, file_info, content
                         )
+                        
+                        # Log detailed breakdown
+                        llm_count = processed_result.get("llm_issues_count", len(analysis_result.get("issues", [])))
+                        static_count = processed_result.get("static_issues_count", 0)
+                        total_count = processed_result.get("total_issues", len(processed_result.get("issues", [])))
+                        
+                        logger.info(
+                            f"WCAG processing completed for {file_info['name']}: "
+                            f"{llm_count} LLM issues + {static_count} static issues = {total_count} total"
+                        )
                         log_success("WCAG processing completed")
                     except Exception as e:
                         log_error(f"WCAG processing failed: {str(e)}")
@@ -488,7 +593,9 @@ async def analyze_accessibility(
                             "total_issues": len(analysis_result.get("issues", [])),
                             "issues": analysis_result.get("issues", []),
                             "error": f"WCAG processing failed: {str(e)}",
-                            "llm_result": analysis_result
+                            "llm_result": analysis_result,
+                            "llm_issues_count": len(analysis_result.get("issues", [])),
+                            "static_issues_count": 0
                         }
 
                     model_results.append(processed_result)
@@ -505,6 +612,28 @@ async def analyze_accessibility(
                     })
 
             results[model] = model_results
+            
+            # Calculate totals for this model
+            total_llm_issues = sum(
+                r.get("llm_issues_count", len(r.get("issues", []))) 
+                for r in model_results 
+                if not r.get("error")
+            )
+            total_static_issues = sum(
+                r.get("static_issues_count", 0) 
+                for r in model_results 
+                if not r.get("error")
+            )
+            total_all_issues = sum(
+                len(r.get("issues", [])) 
+                for r in model_results 
+                if not r.get("error")
+            )
+            
+            logger.info(
+                f"Model {model} processing completed: {len(model_results)} files processed, "
+                f"{total_llm_issues} LLM issues + {total_static_issues} static issues = {total_all_issues} total issues"
+            )
             log_success(f"Model {model} processing completed: {len(model_results)} files processed")
 
         # Store results in database
@@ -932,96 +1061,6 @@ async def health_ready():
 async def health_detailed():
     """Detailed health check with all dependencies"""
     return await detailed_health_check()
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize application on startup - P1 Production Features"""
-    logger.info("Application startup initiated", phase="startup")
-    
-    try:
-        # 1. Initialize Sentry error tracking (P1)
-        if settings.SENTRY_DSN:
-            init_sentry(
-                dsn=settings.SENTRY_DSN,
-                environment=settings.SENTRY_ENVIRONMENT,
-                release=settings.APP_VERSION,
-                traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE
-            )
-            logger.info("Sentry error tracking initialized")
-        else:
-            logger.info("Sentry not configured (SENTRY_DSN not set)")
-        
-        # 2. Initialize cache (P1)
-        if settings.CACHE_ENABLED:
-            await cache_manager.initialize()
-            logger.info("Cache manager initialized")
-        
-        # 3. Initialize Celery for background jobs (P1)
-        if settings.CELERY_ENABLED:
-            if init_celery():
-                logger.info("Celery background jobs initialized")
-            else:
-                logger.warning("Celery initialization failed, using in-process queue")
-        
-        # 4. Create temp directories
-        Path(settings.TEMP_SESSIONS_DIR).mkdir(exist_ok=True)
-        logger.info("Temp directories created", path=settings.TEMP_SESSIONS_DIR)
-        
-        # 5. Initialize database
-        init_db()
-        logger.info("Database initialized")
-        
-        # 6. Clean up expired sessions
-        deleted_count = delete_expired_sessions()
-        if deleted_count > 0:
-            logger.info("Expired sessions cleaned up", count=deleted_count)
-        
-        # 7. Start file cleanup job (P1)
-        cleanup_job = get_cleanup_job()
-        await cleanup_job.start()
-        logger.info("File cleanup job started")
-        
-        # 8. Log configuration summary
-        api_key_count = sum(1 for k in [
-            settings.OPENAI_API_KEY, 
-            settings.ANTHROPIC_API_KEY, 
-            settings.DEEPSEEK_API_KEY,
-            settings.REPLICATE_API_TOKEN
-        ] if k)
-        
-        logger.info("Application startup complete", 
-                   api_keys_configured=api_key_count,
-                   rate_limiting=settings.RATE_LIMIT_ENABLED,
-                   auth_required=settings.AUTH_REQUIRED,
-                   max_file_size_mb=settings.MAX_FILE_SIZE / (1024*1024),
-                   max_total_size_mb=settings.MAX_TOTAL_SIZE / (1024*1024))
-    
-    except Exception as e:
-        logger.error("Startup failed", error=str(e), exc_info=True)
-        capture_exception(e, context={"phase": "startup"})
-        raise
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on application shutdown"""
-    logger.info("Application shutdown initiated")
-    
-    try:
-        # Stop file cleanup job
-        cleanup_job = get_cleanup_job()
-        await cleanup_job.stop()
-        logger.info("File cleanup job stopped")
-        
-        # Disconnect cache
-        if cache_manager.backend and hasattr(cache_manager.backend, 'disconnect'):
-            await cache_manager.backend.disconnect()
-            logger.info("Cache disconnected")
-        
-        logger.info("Application shutdown complete")
-    except Exception as e:
-        logger.error("Shutdown error", error=str(e), exc_info=True)
 
 
 if __name__ == "__main__":
